@@ -19,7 +19,16 @@ class Horario:
 
     def set_hora_desde(self, value: datetime):
         if isinstance(value, str):
-            self._hora_desde = datetime.fromisoformat(value)
+            try:
+                # try full ISO parse
+                self._hora_desde = datetime.fromisoformat(value)
+            except Exception:
+                try:
+                    # try parsing HH:MM
+                    self._hora_desde = datetime.strptime(value, '%H:%M').time()
+                except Exception:
+                    # fallback: keep raw string
+                    self._hora_desde = value
         else:
             self._hora_desde = value
 
@@ -28,7 +37,13 @@ class Horario:
 
     def set_hora_hasta(self, value: datetime):
         if isinstance(value, str):
-            self._hora_hasta = datetime.fromisoformat(value)
+            try:
+                self._hora_hasta = datetime.fromisoformat(value)
+            except Exception:
+                try:
+                    self._hora_hasta = datetime.strptime(value, '%H:%M').time()
+                except Exception:
+                    self._hora_hasta = value
         else:
             self._hora_hasta = value
 

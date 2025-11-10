@@ -9,16 +9,23 @@ from TP_Canchas.entidades.cancha import Cancha
 from TP_Canchas.entidades.reserva import Reserva
 from TP_Canchas.entidades.servicio import Servicio
 from TP_Canchas.entidades.cliente import Cliente
+from TP_Canchas.entidades.horario import Horario
+from TP_Canchas.entidades.tipo_cancha import TipoCancha
+from TP_Canchas.entidades.estado import Estado
 
 
 def _row_to_cancha(row: Dict[str, Any]) -> Cancha:
     # row may contain id, nombre, precio_por_hora, tipo_cancha_id, estado_id, tipo_cancha (nombre), estado (nombre)
-    c = Cancha(id=row.get('id'), tipo_id=row.get('tipo_cancha_id'), precio=row.get('precio_por_hora'), estado_id=row.get('estado_id'))
+    tipo_obj = None
+    estado_obj = None
+    if row.get('tipo_cancha') or row.get('tipo_cancha_id'):
+        tipo_obj = TipoCancha(id=row.get('tipo_cancha_id'), nombre=row.get('tipo_cancha'))
+    if row.get('estado') or row.get('estado_id'):
+        estado_obj = Estado(id=row.get('estado_id'), nombre=row.get('estado'))
+    c = Cancha(id=row.get('id'), tipo=tipo_obj, precio=row.get('precio_por_hora'), estado=estado_obj)
     # attach extra attributes for convenience
     try:
         c.nombre = row.get('nombre')
-        c.tipo_nombre = row.get('tipo_cancha')
-        c.estado_nombre = row.get('estado')
     except Exception:
         pass
     return c
@@ -33,13 +40,27 @@ def _row_to_reserva(row: Dict[str, Any]) -> Reserva:
             fecha = datetime.fromisoformat(inicio).date()
         except Exception:
             fecha = None
-    # prefer cliente_dni if available (new schema), otherwise fall back to cliente_id
-    cliente_dni = row.get('cliente_dni') or (str(row.get('cliente_id')) if row.get('cliente_id') else None)
-    r = Reserva(id=row.get('id'), cliente_dni=cliente_dni, cancha_id=row.get('cancha_id'), horario_id=None, precio_final=row.get('precio'), fecha=fecha)
+    # Build Cliente object from available cliente fields
+    cliente_obj = None
+    if row.get('cliente_dni') or row.get('cliente_nombre'):
+        cliente_obj = Cliente(id=row.get('cliente_id'), dni=row.get('cliente_dni'), nombre=row.get('cliente_nombre'), apellido=row.get('cliente_apellido'), email=row.get('cliente_email'), telefono=row.get('cliente_telefono'))
+    # Build Cancha object (minimal) from reserva join
+    cancha_obj = None
+    if row.get('cancha_id'):
+        cancha_obj = Cancha(id=row.get('cancha_id'))
+        try:
+            cancha_obj.nombre = row.get('cancha_nombre')
+        except Exception:
+            pass
+
+    # Reserva doesn't reference a horario row in the current schema; horario remains optional
+    r = Reserva(id=row.get('id'), cliente=cliente_obj, cancha=cancha_obj, horario=None, precio_final=row.get('precio'), fecha=fecha)
     try:
         r.cancha_nombre = row.get('cancha_nombre')
-        r.cliente_nombre = row.get('cliente_nombre')
-        r.cliente_apellido = row.get('cliente_apellido')
+        # expose cliente attrs for convenience
+        if cliente_obj:
+            r.cliente_nombre = cliente_obj.get_nombre()
+            r.cliente_apellido = cliente_obj.get_apellido()
     except Exception:
         pass
     return r
@@ -128,7 +149,8 @@ def cancelar_reserva(reserva_id: int) -> None:
 
 
 def listar_reservas(cancha_id: Optional[int] = None) -> List[Reserva]:
-    base = "SELECT r.*, c.nombre AS cancha_nombre, cl.nombre AS cliente_nombre, cl.apellido AS cliente_apellido, cl.dni AS cliente_dni FROM reserva r JOIN cancha c ON r.cancha_id = c.id JOIN cliente cl ON r.cliente_id = cl.id"
+    # select cliente details so we can hydrate a Cliente object
+    base = "SELECT r.*, c.nombre AS cancha_nombre, cl.id AS cliente_id, cl.nombre AS cliente_nombre, cl.apellido AS cliente_apellido, cl.dni AS cliente_dni, cl.telefono AS cliente_telefono, cl.email AS cliente_email FROM reserva r JOIN cancha c ON r.cancha_id = c.id JOIN cliente cl ON r.cliente_id = cl.id"
     if cancha_id:
         q = base + " WHERE r.cancha_id = ? ORDER BY r.inicio"
         rows = fetchall(q, (cancha_id,))

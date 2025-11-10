@@ -1,13 +1,14 @@
 from datetime import date
 from typing import Optional
+from TP_Canchas.entidades.reserva import Reserva
 
 
 class Torneo:
-    def __init__(self, id: Optional[int] = None, fecha: Optional[date] = None, ganador: Optional[str] = None, reserva_id: Optional[int] = None):
+    def __init__(self, id: Optional[int] = None, fecha: Optional[date] = None, ganador: Optional[str] = None, reserva: Optional[Reserva] = None):
         self._id = id
         self._fecha = fecha
         self._ganador = ganador
-        self._reserva_id = reserva_id
+        self._reserva = reserva
 
     def get_id(self) -> Optional[int]:
         return self._id
@@ -30,11 +31,14 @@ class Torneo:
     def set_ganador(self, value: str):
         self._ganador = str(value)
 
-    def get_reserva_id(self) -> Optional[int]:
-        return self._reserva_id
+    def get_reserva(self) -> Optional[Reserva]:
+        return self._reserva
 
-    def set_reserva_id(self, value: int):
-        self._reserva_id = int(value)
+    def set_reserva(self, r: Reserva):
+        self._reserva = r
+
+    def get_reserva_id(self) -> Optional[int]:
+        return self._reserva.get_id() if self._reserva else None
 
     def __repr__(self):
-        return f"Torneo(id={self._id}, fecha={self._fecha}, ganador={self._ganador!r}, reserva_id={self._reserva_id})"
+        return f"Torneo(id={self._id}, fecha={self._fecha}, ganador={self._ganador!r}, reserva={self._reserva!r})"

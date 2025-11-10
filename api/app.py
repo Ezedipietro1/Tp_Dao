@@ -1,13 +1,36 @@
 from flask import Flask, jsonify, request
+try:
+    from flask_cors import CORS
+except Exception:
+    CORS = None
 from TP_Canchas import repositorio
 
 app = Flask(__name__)
+if CORS:
+    CORS(app)
 
 
 @app.route('/canchas', methods=['GET'])
 def api_listar_canchas():
     data = repositorio.listar_canchas()
-    return jsonify(data)
+    # ensure JSON serializable: convert entity objects to plain dicts
+    def cancha_to_dict(c):
+        try:
+            # if it's already a dict
+            if isinstance(c, dict):
+                return c
+            # try common accessor methods
+            return {
+                'id': c.get_id() if hasattr(c, 'get_id') else getattr(c, 'id', None),
+                'nombre': getattr(c, 'nombre', None),
+                'precio_por_hora': c.get_precio() if hasattr(c, 'get_precio') else getattr(c, 'precio_por_hora', None),
+                'tipo_cancha_id': c.get_tipo_id() if hasattr(c, 'get_tipo_id') else getattr(c, 'tipo_cancha_id', None),
+                'estado_id': c.get_estado_id() if hasattr(c, 'get_estado_id') else getattr(c, 'estado_id', None),
+            }
+        except Exception:
+            return {}
+
+    return jsonify([cancha_to_dict(c) for c in data])
 
 
 @app.route('/canchas/<int:cancha_id>/disponibilidad', methods=['GET'])
@@ -24,12 +47,38 @@ def api_disponibilidad(cancha_id):
 def api_crear_reserva():
     payload = request.get_json()
     required = ['cancha_id', 'cliente_id', 'inicio', 'fin', 'precio']
-    if not payload or not all(k in payload for k in required):
-        return jsonify({'error': 'Faltan campos en el body. Se requieren: ' + ','.join(required)}), 400
+    if not payload:
+        return jsonify({'error': 'Body JSON requerido'}), 400
+
+    # Support either cliente_id or cliente_dni
+    if 'cliente_id' not in payload and 'cliente_dni' not in payload:
+        return jsonify({'error': 'Se requiere cliente_id o cliente_dni'}), 400
+
+    # Validate basic fields
+    if 'cancha_id' not in payload or 'inicio' not in payload or 'fin' not in payload or 'precio' not in payload:
+        return jsonify({'error': 'Faltan campos en el body. Se requieren: cancha_id, inicio, fin, precio y cliente_id|cliente_dni'}), 400
+
+    cancha_id = payload['cancha_id']
+    inicio = payload['inicio']
+    fin = payload['fin']
+    precio = payload['precio']
+
     # verificar disponibilidad
-    if not repositorio.verificar_disponibilidad(payload['cancha_id'], payload['inicio'], payload['fin']):
+    if not repositorio.verificar_disponibilidad(cancha_id, inicio, fin):
         return jsonify({'error': 'Cancha no disponible en el periodo solicitado'}), 409
-    rid = repositorio.crear_reserva(payload)
+
+    try:
+        if 'cliente_dni' in payload and 'cliente_id' not in payload:
+            # use crear_reserva_por_dni which will create the cliente if needed
+            rid = repositorio.crear_reserva_por_dni(payload)
+        else:
+            # expect cliente_id present
+            rid = repositorio.crear_reserva(payload)
+    except ValueError as ve:
+        return jsonify({'error': str(ve)}), 400
+    except Exception as e:
+        return jsonify({'error': 'Error interno al crear la reserva', 'detail': str(e)}), 500
+
     return jsonify({'reserva_id': rid}), 201
 
 
