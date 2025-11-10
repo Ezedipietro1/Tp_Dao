@@ -16,6 +16,9 @@ python -m http.server 8000 -d frontend
 
 ```powershell
 python -m TP_Canchas.api.app
+
+Set-Location 'D:\DAO'
+.\TP_Canchas\.venv\Scripts\python.exe -m TP_Canchas.api.app
 # abrir http://127.0.0.1:5000/static/index.html o ajustar rutas
 ```
 

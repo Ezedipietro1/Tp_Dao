@@ -52,6 +52,49 @@ def api_listar_horarios(cancha_id):
         return jsonify({'error': 'Error al obtener horarios', 'detail': str(e)}), 500
 
 
+@app.route('/clientes', methods=['GET'])
+def api_listar_clientes():
+    try:
+        cs = repositorio.listar_clientes()
+        return jsonify(cs)
+    except Exception as e:
+        return jsonify({'error': 'Error al obtener clientes', 'detail': str(e)}), 500
+
+
+@app.route('/reservas', methods=['GET'])
+def api_listar_reservas():
+    try:
+        cancha_id = request.args.get('cancha_id', type=int)
+        cliente_id = request.args.get('cliente_id', type=int)
+        reservas = repositorio.listar_reservas(cancha_id if cancha_id else None)
+        # filter by cliente_id if provided
+        if cliente_id:
+            reservas = [r for r in reservas if getattr(r, 'cliente', None) and getattr(r.cliente, 'id', None) == cliente_id or getattr(r, 'cliente_id', None) == cliente_id]
+
+        def reserva_to_dict(r):
+            try:
+                fecha = r.get_fecha()
+                fecha_iso = fecha.isoformat() if fecha else None
+            except Exception:
+                fecha_iso = None
+            return {
+                'id': r.get_id() if hasattr(r, 'get_id') else getattr(r, 'id', None),
+                'cancha_id': r.get_cancha_id() if hasattr(r, 'get_cancha_id') else getattr(r, 'cancha', {}).get('id', None) if isinstance(getattr(r, 'cancha', None), dict) else getattr(r, 'cancha', None).id if getattr(r, 'cancha', None) else None,
+                'cancha_nombre': getattr(r, 'cancha_nombre', None),
+                'cliente_id': getattr(r, 'cliente', None).id if getattr(r, 'cliente', None) else getattr(r, 'cliente_id', None),
+                'cliente_dni': getattr(r, 'cliente', None).get_dni() if getattr(r, 'cliente', None) and hasattr(r.cliente, 'get_dni') else getattr(r, 'cliente_dni', None),
+                'cliente_nombre': getattr(r, 'cliente_nombre', None),
+                'inicio': getattr(r, 'inicio', None),
+                'fin': getattr(r, 'fin', None),
+                'precio': r.get_precio_final() if hasattr(r, 'get_precio_final') else getattr(r, 'precio_final', None),
+                'fecha': fecha_iso,
+            }
+
+        return jsonify([reserva_to_dict(r) for r in reservas])
+    except Exception as e:
+        return jsonify({'error': 'Error al obtener reservas', 'detail': str(e)}), 500
+
+
 @app.route('/reservas', methods=['POST'])
 def api_crear_reserva():
     payload = request.get_json()

@@ -57,6 +57,9 @@ def _row_to_reserva(row: Dict[str, Any]) -> Reserva:
     r = Reserva(id=row.get('id'), cliente=cliente_obj, cancha=cancha_obj, horario=None, precio_final=row.get('precio'), fecha=fecha)
     try:
         r.cancha_nombre = row.get('cancha_nombre')
+        # attach inicio/fin from row for convenience (ISO strings)
+        r.inicio = row.get('inicio')
+        r.fin = row.get('fin')
         # expose cliente attrs for convenience
         if cliente_obj:
             r.cliente_nombre = cliente_obj.get_nombre()
@@ -168,6 +171,13 @@ def listar_horarios(cancha_id: Optional[int] = None) -> List[Dict[str, Any]]:
     else:
         q = "SELECT id, cancha_id, dia_semana, inicio, fin FROM horario ORDER BY cancha_id, dia_semana, inicio"
         rows = fetchall(q)
+    return rows
+
+
+def listar_clientes() -> List[Dict[str, Any]]:
+    """Retorna todos los clientes como dicts simples."""
+    q = "SELECT id, dni, nombre, apellido, email, telefono FROM cliente ORDER BY id"
+    rows = fetchall(q)
     return rows
 
 

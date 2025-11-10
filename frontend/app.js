@@ -208,7 +208,63 @@ window.addEventListener('load', () => {
     horarioSelect.innerHTML = '<option value="">-- seleccionar fecha primero --</option>';
     horarioSelect.disabled = true;
   }
+  // navigation buttons
+  const show = (id) => {
+    // hide all content sections
+    ['main-menu','canchas-section','reserva-section','clientes-section','reservas-section'].forEach(s => {
+      const el = document.getElementById(s);
+      if (el) el.classList.add('d-none');
+    });
+    const target = document.getElementById(id);
+    if (target) target.classList.remove('d-none');
+  };
+  document.getElementById('btn-canchas').addEventListener('click', () => { show('canchas-section'); listarCanchas(); });
+  document.getElementById('btn-reservar').addEventListener('click', () => { show('reserva-section'); });
+  document.getElementById('btn-clientes').addEventListener('click', () => { show('clientes-section'); listarClientes(); });
+  // reservas view
+  const btnReservas = document.getElementById('btn-reservas');
+  if (btnReservas) btnReservas.addEventListener('click', () => { show('reservas-section'); listarReservas(); });
+  // back buttons inside sections
+  document.querySelectorAll('.btn-back').forEach(b => b.addEventListener('click', () => show('main-menu')));
+  // initial view: main menu
+  show('main-menu');
 });
+
+async function listarClientes() {
+  const listEl = document.getElementById('clientes-list');
+  listEl.innerHTML = 'Cargando...';
+  try {
+    const clientes = await fetchJSON('/clientes');
+    listEl.innerHTML = '';
+    clientes.forEach(c => {
+      const item = document.createElement('div');
+      item.className = 'list-group-item';
+      item.textContent = `${c.id} — ${c.nombre || ''} ${c.apellido || ''} — DNI: ${c.dni || ''}`;
+      listEl.appendChild(item);
+    });
+  } catch (err) {
+    listEl.innerHTML = `<div class="text-danger">Error cargando clientes: ${err.message}</div>`;
+  }
+}
+
+async function listarReservas() {
+  const listEl = document.getElementById('reservas-list');
+  listEl.innerHTML = 'Cargando...';
+  try {
+    const reservas = await fetchJSON('/reservas');
+    listEl.innerHTML = '';
+    reservas.forEach(r => {
+      const item = document.createElement('div');
+      item.className = 'list-group-item';
+      const inicio = r.inicio ? r.inicio.replace('T', ' ') : '';
+      const fin = r.fin ? r.fin.replace('T', ' ') : '';
+      item.textContent = `#${r.id} — ${r.cancha_nombre || ('Cancha ' + (r.cancha_id||''))} — ${r.cliente_nombre||''} (${r.cliente_dni||''}) — ${inicio} - ${fin} — $${r.precio}`;
+      listEl.appendChild(item);
+    });
+  } catch (err) {
+    listEl.innerHTML = `<div class="text-danger">Error cargando reservas: ${err.message}</div>`;
+  }
+}
 
 // manual datetime inputs removed; no visibility toggling needed
 
