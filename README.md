@@ -21,10 +21,7 @@ pip install -r requirements.txt
 
 Crear la base de datos y cargar esquema y datos de ejemplo:
 
-```powershell
-# Desde la carpeta TP_Canchas
-python -c "from TP_Canchas.db.connection import run_script; run_script('db/schema.sql'); run_script('db/seed.sql')"
-```
+python .\db\init_db.py
 
 Ejecutar la API local:
 

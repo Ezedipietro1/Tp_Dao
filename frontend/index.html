@@ -24,23 +24,28 @@
           <select id="cancha-select" class="form-select"></select>
         </div>
         <div class="mb-3">
+          <label for="fecha-select" class="form-label">Fecha (si usás un horario)</label>
+          <input id="fecha-select" type="date" class="form-control">
+        </div>
+        <div class="mb-3">
+          <label for="horario-select" class="form-label">Horario disponible</label>
+          <select id="horario-select" class="form-select">
+            <option value="">-- seleccionar horario --</option>
+          </select>
+          <div class="form-text">Seleccioná una fecha arriba y luego un horario para autocompletar inicio/fin.</div>
+        </div>
+        <div class="mb-3">
           <label class="form-label">Cliente (DNI o ID)</label>
           <div class="input-group">
             <input id="cliente-dni" type="text" class="form-control" placeholder="DNI (preferido)">
             <input id="cliente-id" type="number" class="form-control" placeholder="o cliente_id (opcional)">
           </div>
         </div>
-        <div class="mb-3">
-          <label for="inicio" class="form-label">Inicio (ISO)</label>
-          <input id="inicio" type="datetime-local" class="form-control">
-        </div>
-        <div class="mb-3">
-          <label for="fin" class="form-label">Fin (ISO)</label>
-          <input id="fin" type="datetime-local" class="form-control">
-        </div>
+        <!-- Ahora se elige fecha + horario; no hay entrada manual de inicio/fin -->
         <div class="mb-3">
           <label for="precio" class="form-label">Precio</label>
-          <input id="precio" type="number" step="0.01" class="form-control" placeholder="Precio total">
+          <!-- Precio calculado automáticamente: no editable -->
+          <input id="precio" type="text" class="form-control" placeholder="Precio total" readonly>
         </div>
         <button class="btn btn-primary" type="submit">Crear reserva</button>
       </form>

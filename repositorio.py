@@ -160,6 +160,17 @@ def listar_reservas(cancha_id: Optional[int] = None) -> List[Reserva]:
     return [_row_to_reserva(r) for r in rows]
 
 
+def listar_horarios(cancha_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Retorna una lista de horarios; si se pasa cancha_id filtra por cancha."""
+    if cancha_id:
+        q = "SELECT id, cancha_id, dia_semana, inicio, fin FROM horario WHERE cancha_id = ? ORDER BY dia_semana, inicio"
+        rows = fetchall(q, (cancha_id,))
+    else:
+        q = "SELECT id, cancha_id, dia_semana, inicio, fin FROM horario ORDER BY cancha_id, dia_semana, inicio"
+        rows = fetchall(q)
+    return rows
+
+
 def calcular_ingresos(fecha_inicio_iso: str, fecha_fin_iso: str) -> float:
     q = "SELECT SUM(p.monto) AS total FROM pago p JOIN reserva r ON p.reserva_id = r.id WHERE p.fecha >= ? AND p.fecha <= ?"
     row = fetchone(q, (fecha_inicio_iso, fecha_fin_iso))

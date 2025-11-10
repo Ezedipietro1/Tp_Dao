@@ -43,6 +43,15 @@ def api_disponibilidad(cancha_id):
     return jsonify({'cancha_id': cancha_id, 'disponible': ok})
 
 
+@app.route('/canchas/<int:cancha_id>/horarios', methods=['GET'])
+def api_listar_horarios(cancha_id):
+    try:
+        hs = repositorio.listar_horarios(cancha_id)
+        return jsonify(hs)
+    except Exception as e:
+        return jsonify({'error': 'Error al obtener horarios', 'detail': str(e)}), 500
+
+
 @app.route('/reservas', methods=['POST'])
 def api_crear_reserva():
     payload = request.get_json()
