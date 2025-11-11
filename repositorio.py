@@ -4,14 +4,14 @@ Ahora devuelve instancias de las clases en `TP_Canchas.entidades` cuando es posi
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
-from TP_Canchas.db.connection import fetchall, fetchone, execute
-from TP_Canchas.entidades.cancha import Cancha
-from TP_Canchas.entidades.reserva import Reserva
-from TP_Canchas.entidades.servicio import Servicio
-from TP_Canchas.entidades.cliente import Cliente
-from TP_Canchas.entidades.horario import Horario
-from TP_Canchas.entidades.tipo_cancha import TipoCancha
-from TP_Canchas.entidades.estado import Estado
+from db.connection import fetchall, fetchone, execute
+from entidades.cancha import Cancha
+from entidades.reserva import Reserva
+from entidades.servicio import Servicio
+from entidades.cliente import Cliente
+from entidades.horario import Horario
+from entidades.tipo_cancha import TipoCancha
+from entidades.estado import Estado
 
 
 def _row_to_cancha(row: Dict[str, Any]) -> Cancha:
@@ -43,7 +43,8 @@ def _row_to_reserva(row: Dict[str, Any]) -> Reserva:
     # Build Cliente object from available cliente fields
     cliente_obj = None
     if row.get('cliente_dni') or row.get('cliente_nombre'):
-        cliente_obj = Cliente(id=row.get('cliente_id'), dni=row.get('cliente_dni'), nombre=row.get('cliente_nombre'), apellido=row.get('cliente_apellido'), email=row.get('cliente_email'), telefono=row.get('cliente_telefono'))
+        # Cliente entity uses dni as unique id
+        cliente_obj = Cliente(row.get('cliente_dni'), row.get('cliente_nombre'), row.get('cliente_apellido'), row.get('cliente_email'), row.get('cliente_telefono'))
     # Build Cancha object (minimal) from reserva join
     cancha_obj = None
     if row.get('cancha_id'):
@@ -92,10 +93,9 @@ def crear_reserva_por_dni(reserva: Dict[str, Any]) -> int:
     c = get_cliente_por_dni(dni)
     if not c:
         # crear cliente mínimo
-        cid = crear_cliente({'dni': dni, 'nombre': reserva.get('cliente_nombre', 'Anonimo'), 'apellido': reserva.get('cliente_apellido', ''), 'email': None, 'telefono': None})
-    else:
-        cid = c['id']
-    payload = {'cancha_id': reserva['cancha_id'], 'cliente_id': cid, 'inicio': reserva['inicio'], 'fin': reserva['fin'], 'precio': reserva['precio']}
+        crear_cliente({'dni': dni, 'nombre': reserva.get('cliente_nombre', 'Anonimo'), 'apellido': reserva.get('cliente_apellido', ''), 'email': None, 'telefono': None})
+    # Build payload referencing cliente_dni (not numeric id)
+    payload = {'cancha_id': reserva['cancha_id'], 'cliente_dni': dni, 'inicio': reserva['inicio'], 'fin': reserva['fin'], 'precio': reserva['precio']}
     return crear_reserva(payload)
 
 
@@ -139,11 +139,18 @@ def verificar_disponibilidad(cancha_id: int, inicio_iso: str, fin_iso: str) -> b
 
 def crear_reserva(reserva: Dict[str, Any]) -> int:
     """Crear una reserva.
-    reserva dict debe contener: cancha_id, cliente_id, inicio (ISO), fin (ISO), precio
+    reserva dict debe contener: cancha_id, cliente_dni, inicio (ISO), fin (ISO), precio
     Retorna id de la reserva.
     """
-    q = "INSERT INTO reserva (cancha_id, cliente_id, inicio, fin, precio, estado_id) VALUES (?, ?, ?, ?, ?, 1)"
-    return execute(q, (reserva['cancha_id'], reserva['cliente_id'], reserva['inicio'], reserva['fin'], reserva['precio']))
+    # additionally validate there isn't already an active reserva for the same
+    # cancha on the same date with identical inicio/fin (same slot selected)
+    q_check = "SELECT COUNT(1) AS cnt FROM reserva WHERE cancha_id = ? AND date(inicio) = date(?) AND inicio = ? AND fin = ? AND estado_id = 1"
+    row = fetchone(q_check, (reserva['cancha_id'], reserva['inicio'], reserva['inicio'], reserva['fin']))
+    if row and row.get('cnt', 0) > 0:
+        raise ValueError('Ya existe una reserva activa para esa cancha en el mismo día y horario')
+
+    q = "INSERT INTO reserva (cancha_id, cliente_dni, inicio, fin, precio, estado_id) VALUES (?, ?, ?, ?, ?, 1)"
+    return execute(q, (reserva['cancha_id'], reserva['cliente_dni'], reserva['inicio'], reserva['fin'], reserva['precio']))
 
 
 def cancelar_reserva(reserva_id: int) -> None:
@@ -153,7 +160,7 @@ def cancelar_reserva(reserva_id: int) -> None:
 
 def listar_reservas(cancha_id: Optional[int] = None) -> List[Reserva]:
     # select cliente details so we can hydrate a Cliente object
-    base = "SELECT r.*, c.nombre AS cancha_nombre, cl.id AS cliente_id, cl.nombre AS cliente_nombre, cl.apellido AS cliente_apellido, cl.dni AS cliente_dni, cl.telefono AS cliente_telefono, cl.email AS cliente_email FROM reserva r JOIN cancha c ON r.cancha_id = c.id JOIN cliente cl ON r.cliente_id = cl.id"
+    base = "SELECT r.*, c.nombre AS cancha_nombre, cl.dni AS cliente_dni, cl.nombre AS cliente_nombre, cl.apellido AS cliente_apellido, cl.telefono AS cliente_telefono, cl.email AS cliente_email FROM reserva r JOIN cancha c ON r.cancha_id = c.id JOIN cliente cl ON r.cliente_dni = cl.dni"
     if cancha_id:
         q = base + " WHERE r.cancha_id = ? ORDER BY r.inicio"
         rows = fetchall(q, (cancha_id,))
@@ -163,20 +170,16 @@ def listar_reservas(cancha_id: Optional[int] = None) -> List[Reserva]:
     return [_row_to_reserva(r) for r in rows]
 
 
-def listar_horarios(cancha_id: Optional[int] = None) -> List[Dict[str, Any]]:
-    """Retorna una lista de horarios; si se pasa cancha_id filtra por cancha."""
-    if cancha_id:
-        q = "SELECT id, cancha_id, dia_semana, inicio, fin FROM horario WHERE cancha_id = ? ORDER BY dia_semana, inicio"
-        rows = fetchall(q, (cancha_id,))
-    else:
-        q = "SELECT id, cancha_id, dia_semana, inicio, fin FROM horario ORDER BY cancha_id, dia_semana, inicio"
-        rows = fetchall(q)
+def listar_horarios() -> List[Dict[str, Any]]:
+    """Retorna la lista global de horarios predefinidos (no ligados a una cancha)."""
+    q = "SELECT id, dia_semana, inicio, fin FROM horario ORDER BY dia_semana, inicio"
+    rows = fetchall(q)
     return rows
 
 
 def listar_clientes() -> List[Dict[str, Any]]:
     """Retorna todos los clientes como dicts simples."""
-    q = "SELECT id, dni, nombre, apellido, email, telefono FROM cliente ORDER BY id"
+    q = "SELECT dni, nombre, apellido, email, telefono FROM cliente ORDER BY dni"
     rows = fetchall(q)
     return rows
 

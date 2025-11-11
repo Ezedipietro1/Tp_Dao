@@ -66,7 +66,7 @@ async function listarHorarios(canchaId, fecha) {
   horarioSelect.innerHTML = '<option value="">-- cargando horarios --</option>';
   horarioSelect.disabled = false;
   try {
-    const hs = await fetchJSON(`/canchas/${canchaId}/horarios`);
+  const hs = await fetchJSON(`/horarios`);
     // filter horarios by weekday of fecha (0=Sun..6=Sat)
     const wd = new Date(fecha + 'T00:00:00').getDay();
     const filtered = hs.filter(h => Number(h.dia_semana) === wd);
@@ -114,8 +114,6 @@ async function crearReserva(e) {
   resultEl.innerHTML = '';
   const canchaId = parseInt(document.getElementById('cancha-select').value, 10);
   const clienteDni = document.getElementById('cliente-dni').value.trim();
-  const clienteIdRaw = document.getElementById('cliente-id').value;
-  const clienteId = clienteIdRaw ? parseInt(clienteIdRaw, 10) : null;
   // determine inicio/fin: if horario selected + fecha, build from that; otherwise use manual datetime inputs
   const horarioSel = document.getElementById('horario-select').value;
   let inicio = null;
@@ -149,14 +147,13 @@ async function crearReserva(e) {
   }
   const precio = parseFloat(document.getElementById('precio').value);
 
-  if (!canchaId || (!clienteId && !clienteDni) || !inicio || !fin || isNaN(precio)) {
+  if (!canchaId || (!clienteDni) || !inicio || !fin || isNaN(precio)) {
     resultEl.innerHTML = '<div class="text-danger">Completar todos los campos requeridos.</div>';
     return;
   }
 
   const payload = { cancha_id: canchaId, inicio, fin, precio };
-  if (clienteDni && !clienteId) payload.cliente_dni = clienteDni;
-  else payload.cliente_id = clienteId;
+  payload.cliente_dni = clienteDni;
 
   try {
     const data = await fetchJSON('/reservas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -239,7 +236,7 @@ async function listarClientes() {
     clientes.forEach(c => {
       const item = document.createElement('div');
       item.className = 'list-group-item';
-      item.textContent = `${c.id} — ${c.nombre || ''} ${c.apellido || ''} — DNI: ${c.dni || ''}`;
+      item.textContent = `${c.dni} — ${c.nombre || ''} ${c.apellido || ''}`;
       listEl.appendChild(item);
     });
   } catch (err) {

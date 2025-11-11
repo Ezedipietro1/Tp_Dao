@@ -1,18 +1,20 @@
 from datetime import date
 from typing import Optional
-from TP_Canchas.entidades.cliente import Cliente
-from TP_Canchas.entidades.cancha import Cancha
-from TP_Canchas.entidades.horario import Horario
+from entidades.cliente import Cliente
+from entidades.cancha import Cancha
+from entidades.horario import Horario
+from entidades.torneo import Torneo
 
 
 class Reserva:
-    def __init__(self, id: Optional[int] = None, cliente: Optional[Cliente] = None, cancha: Optional[Cancha] = None, horario: Optional[Horario] = None, precio_final: Optional[float] = None, fecha: Optional[date] = None):
+    def __init__(self, id: int, cliente: Cliente, cancha: Cancha, horarios: list[Horario], fecha: date, torneo: Optional[Torneo] = None):
         self._id = id
         self._cliente = cliente
         self._cancha = cancha
-        self._horario = horario
-        self._precio_final = None if precio_final is None else float(precio_final)
+        self._horarios = horarios
         self._fecha = fecha
+        self._precio_final = self.calcular_precio_final()
+        self._torneo = torneo
 
     def get_id(self) -> Optional[int]:
         return self._id
@@ -63,6 +65,13 @@ class Reserva:
             self._fecha = date.fromisoformat(value)
         else:
             self._fecha = value
+            
+    def calcular_precio_final(self) -> Optional[float]:
+        if not self._cancha or not self._horarios:
+            return None
+        precio_base = self._cancha.get_precio()
+        cantidad_horas = len(self._horarios)
+        return precio_base * cantidad_horas
 
     def __repr__(self):
         return f"Reserva(id={self._id}, cliente={self._cliente!r}, cancha={self._cancha!r}, horario={self._horario!r}, precio_final={self._precio_final}, fecha={self._fecha})"

@@ -1,13 +1,10 @@
-from typing import Optional
-
-
 class TipoCancha:
-    def __init__(self, id: Optional[int] = None, nombre: str = "", precio: float = 0.0):
-        self._id = id
+    def __init__(self, id: int, nombre: str, precio: float):
+        self._id = int(id)
         self._nombre = nombre
         self._precio = float(precio)
 
-    def get_id(self) -> Optional[int]:
+    def get_id(self) -> int:
         return self._id
 
     def set_id(self, value: int):

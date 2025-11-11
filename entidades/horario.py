@@ -1,20 +1,17 @@
 from datetime import datetime
-from typing import Optional
-
 
 class Horario:
-    def __init__(self, id: Optional[int] = None, hora_desde: Optional[datetime] = None, hora_hasta: Optional[datetime] = None):
-        self._id = id
+    def __init__(self, id: int, hora_desde: datetime, hora_hasta: datetime):
+        self._id = int(id)
         self._hora_desde = hora_desde
         self._hora_hasta = hora_hasta
-
-    def get_id(self) -> Optional[int]:
+    def get_id(self) -> int:
         return self._id
 
     def set_id(self, value: int):
         self._id = int(value)
 
-    def get_hora_desde(self) -> Optional[datetime]:
+    def get_hora_desde(self) -> datetime:
         return self._hora_desde
 
     def set_hora_desde(self, value: datetime):
@@ -32,7 +29,7 @@ class Horario:
         else:
             self._hora_desde = value
 
-    def get_hora_hasta(self) -> Optional[datetime]:
+    def get_hora_hasta(self) -> datetime:
         return self._hora_hasta
 
     def set_hora_hasta(self, value: datetime):
