@@ -67,11 +67,12 @@ async function listarHorarios(canchaId, fecha) {
   horarioSelect.disabled = false;
   try {
   const hs = await fetchJSON(`/horarios`);
-    // filter horarios by weekday of fecha (0=Sun..6=Sat)
-    const wd = new Date(fecha + 'T00:00:00').getDay();
-    const filtered = hs.filter(h => Number(h.dia_semana) === wd);
-
-    horarioSelect.innerHTML = '<option value="">-- seleccionar horario --</option>';
+    // horarios are global (no dia_semana). Show all and let the user select one or more.
+    horarioSelect.innerHTML = '';
+    // make the select allow multiple choices for multi-slot reservations
+    horarioSelect.multiple = true;
+    horarioSelect.size = Math.min(8, hs.length || 8);
+    horarioSelect.innerHTML = '<option value="" disabled>-- seleccionar uno o más horarios (Ctrl/Cmd+click) --</option>';
     // determine if fecha is today to disable past slots
     const todayStr = new Date().toISOString().slice(0,10);
     const fechaIsToday = (fecha === todayStr);
@@ -82,7 +83,7 @@ async function listarHorarios(canchaId, fecha) {
     const now = new Date();
     const nowMinutes = now.getHours()*60 + now.getMinutes();
 
-    filtered.forEach(h => {
+    hs.forEach(h => {
       const opt = document.createElement('option');
       opt.value = JSON.stringify(h);
       let label = `${h.inicio}-${h.fin}`;
@@ -115,50 +116,49 @@ async function crearReserva(e) {
   const canchaId = parseInt(document.getElementById('cancha-select').value, 10);
   const clienteDni = document.getElementById('cliente-dni').value.trim();
   // determine inicio/fin: if horario selected + fecha, build from that; otherwise use manual datetime inputs
-  const horarioSel = document.getElementById('horario-select').value;
-  let inicio = null;
-  let fin = null;
-  if (horarioSel) {
-    const h = JSON.parse(horarioSel);
-    const fecha = document.getElementById('fecha-select').value; // YYYY-MM-DD
-    if (!fecha) {
-      resultEl.innerHTML = '<div class="text-danger">Debés indicar la fecha para la reserva.</div>';
-      return;
-    }
-    // validate fecha not before today
-    const today = new Date();
-    const selDate = new Date(fecha + 'T00:00:00');
-    if (selDate.setHours(0,0,0,0) < new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) {
-      resultEl.innerHTML = '<div class="text-danger">La fecha no puede ser anterior al día de hoy.</div>';
-      return;
-    }
-    inicio = `${fecha}T${h.inicio.length===5? h.inicio+':00' : h.inicio}`;
-    fin = `${fecha}T${h.fin.length===5? h.fin+':00' : h.fin}`;
-    // ensure the selected option isn't disabled (i.e., a past slot for today)
-    const horarioSelectEl = document.getElementById('horario-select');
-    const selOpt = horarioSelectEl.options[horarioSelectEl.selectedIndex];
-    if (selOpt && selOpt.disabled) {
-      resultEl.innerHTML = '<div class="text-danger">El horario seleccionado no está disponible (es anterior a la hora actual).</div>';
-      return;
-    }
-  } else {
-    resultEl.innerHTML = '<div class="text-danger">Debés seleccionar un horario.</div>';
+  // collect one or more selected horarios
+  const horarioSelectEl = document.getElementById('horario-select');
+  const selectedOptions = Array.from(horarioSelectEl.selectedOptions).filter(o => o.value);
+  if (selectedOptions.length === 0) {
+    resultEl.innerHTML = '<div class="text-danger">Debés seleccionar al menos un horario.</div>';
     return;
   }
+  const fecha = document.getElementById('fecha-select').value; // YYYY-MM-DD
+  if (!fecha) {
+    resultEl.innerHTML = '<div class="text-danger">Debés indicar la fecha para la reserva.</div>';
+    return;
+  }
+  // validate fecha not before today
+  const today = new Date();
+  const selDate = new Date(fecha + 'T00:00:00');
+  if (selDate.setHours(0,0,0,0) < new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) {
+    resultEl.innerHTML = '<div class="text-danger">La fecha no puede ser anterior al día de hoy.</div>';
+    return;
+  }
+  // ensure none of the selected options is disabled
+  for (const opt of selectedOptions) {
+    if (opt.disabled) {
+      resultEl.innerHTML = '<div class="text-danger">Algunos horarios seleccionados no están disponibles (son anteriores a la hora actual).</div>';
+      return;
+    }
+  }
+  const horario_objs = selectedOptions.map(o => JSON.parse(o.value));
+  const horario_ids = horario_objs.map(h => h.id);
   const precio = parseFloat(document.getElementById('precio').value);
 
-  if (!canchaId || (!clienteDni) || !inicio || !fin || isNaN(precio)) {
+  if (!canchaId || !clienteDni || !fecha || horario_ids.length === 0 || isNaN(precio)) {
     resultEl.innerHTML = '<div class="text-danger">Completar todos los campos requeridos.</div>';
     return;
   }
 
-  const payload = { cancha_id: canchaId, inicio, fin, precio };
+  const payload = { cancha_id: canchaId, fecha: fecha, horario_ids: horario_ids, precio };
   payload.cliente_dni = clienteDni;
 
   try {
     const data = await fetchJSON('/reservas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     resultEl.innerHTML = `<div class="text-success">Reserva creada. ID: ${data.reserva_id}</div>`;
   } catch (err) {
+    // try to extract server message
     resultEl.innerHTML = `<div class="text-danger">Error: ${err.message}</div>`;
   }
 }
@@ -253,9 +253,9 @@ async function listarReservas() {
     reservas.forEach(r => {
       const item = document.createElement('div');
       item.className = 'list-group-item';
-      const inicio = r.inicio ? r.inicio.replace('T', ' ') : '';
-      const fin = r.fin ? r.fin.replace('T', ' ') : '';
-      item.textContent = `#${r.id} — ${r.cancha_nombre || ('Cancha ' + (r.cancha_id||''))} — ${r.cliente_nombre||''} (${r.cliente_dni||''}) — ${inicio} - ${fin} — $${r.precio}`;
+      const fecha = r.fecha || '';
+      const horariosLabel = (r.horarios_label && Array.isArray(r.horarios_label)) ? r.horarios_label.join(', ') : (r.horarios && Array.isArray(r.horarios) ? r.horarios.map(h => `${h.inicio}-${h.fin}`).join(', ') : '');
+      item.textContent = `#${r.id} — ${r.cancha_nombre || ('Cancha ' + (r.cancha_id||''))} — ${r.cliente_nombre||''} (${r.cliente_dni||''}) — ${fecha} — ${horariosLabel} — $${r.precio}`;
       listEl.appendChild(item);
     });
   } catch (err) {
@@ -268,26 +268,37 @@ async function listarReservas() {
 function computeAndShowPrice() {
   try {
     const canchaId = parseInt(document.getElementById('cancha-select').value, 10);
-    const horarioSel = document.getElementById('horario-select').value;
+    const horarioSelect = document.getElementById('horario-select');
     const precioEl = document.getElementById('precio');
-    if (!canchaId || !horarioSel) {
+    if (!canchaId || !horarioSelect) {
       if (precioEl) precioEl.value = '';
       return;
     }
-    const h = JSON.parse(horarioSel);
+    const selectedOptions = Array.from(horarioSelect.selectedOptions).filter(o => o.value && !o.disabled);
+    if (selectedOptions.length === 0) {
+      if (precioEl) precioEl.value = '';
+      return;
+    }
     const cancha = canchasCache.find(c => (c.id ?? (c.get_id ? c.get_id() : null)) == canchaId);
     const precioHora = cancha ? (cancha.precio_por_hora ?? (cancha.get_precio ? cancha.get_precio() : 0)) : 0;
-    // parse times 'HH:MM' or 'HH:MM:SS'
     function parseToMinutes(t) {
-      const parts = t.split(':').map(p => parseInt(p, 10));
+      const parts = String(t).split(':').map(p => parseInt(p, 10));
       return parts[0]*60 + (parts[1]||0);
     }
-    const startM = parseToMinutes(h.inicio);
-    const endM = parseToMinutes(h.fin);
-    let diff = endM - startM;
-    if (diff <= 0) diff += 24*60; // handle wrap-around
-    const hours = diff/60;
-    const total = Math.round((hours * precioHora + Number.EPSILON) * 100) / 100;
+    let totalHours = 0;
+    selectedOptions.forEach(opt => {
+      try {
+        const h = JSON.parse(opt.value);
+        const startM = parseToMinutes(h.inicio);
+        const endM = parseToMinutes(h.fin);
+        let diff = endM - startM;
+        if (diff <= 0) diff += 24*60;
+        totalHours += diff/60;
+      } catch (e) {
+        // ignore malformed option
+      }
+    });
+    const total = Math.round((totalHours * precioHora + Number.EPSILON) * 100) / 100;
     if (precioEl) precioEl.value = total.toFixed(2);
   } catch (e) {
     // ignore

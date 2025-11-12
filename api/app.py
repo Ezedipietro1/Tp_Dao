@@ -3,6 +3,9 @@ try:
     from flask_cors import CORS
 except Exception:
     CORS = None
+import os, sys
+# ensure project root is on sys.path so imports like `import repositorio` work
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import repositorio
 
 app = Flask(__name__)
@@ -12,25 +15,28 @@ if CORS:
 
 @app.route('/canchas', methods=['GET'])
 def api_listar_canchas():
-    data = repositorio.listar_canchas()
-    # ensure JSON serializable: convert entity objects to plain dicts
-    def cancha_to_dict(c):
-        try:
-            # if it's already a dict
-            if isinstance(c, dict):
-                return c
-            # try common accessor methods
-            return {
-                'id': c.get_id() if hasattr(c, 'get_id') else getattr(c, 'id', None),
-                'nombre': getattr(c, 'nombre', None),
-                'precio_por_hora': c.get_precio() if hasattr(c, 'get_precio') else getattr(c, 'precio_por_hora', None),
-                'tipo_cancha_id': c.get_tipo_id() if hasattr(c, 'get_tipo_id') else getattr(c, 'tipo_cancha_id', None),
-                'estado_id': c.get_estado_id() if hasattr(c, 'get_estado_id') else getattr(c, 'estado_id', None),
-            }
-        except Exception:
-            return {}
+    try:
+        data = repositorio.listar_canchas()
+        # ensure JSON serializable: convert entity objects to plain dicts
+        def cancha_to_dict(c):
+            try:
+                # if it's already a dict
+                if isinstance(c, dict):
+                    return c
+                # try common accessor methods
+                return {
+                    'id': c.get_id() if hasattr(c, 'get_id') else getattr(c, 'id', None),
+                    'nombre': getattr(c, 'nombre', None),
+                    'precio_por_hora': c.get_precio() if hasattr(c, 'get_precio') else getattr(c, 'precio_por_hora', None),
+                    'tipo_cancha_id': c.get_tipo_id() if hasattr(c, 'get_tipo_id') else getattr(c, 'tipo_cancha_id', None),
+                    'estado_id': c.get_estado_id() if hasattr(c, 'get_estado_id') else getattr(c, 'estado_id', None),
+                }
+            except Exception:
+                return {}
 
-    return jsonify([cancha_to_dict(c) for c in data])
+        return jsonify([cancha_to_dict(c) for c in data])
+    except Exception as e:
+        return jsonify({'error': 'Error al listar canchas', 'detail': str(e)}), 500
 
 
 @app.route('/canchas/<int:cancha_id>/disponibilidad', methods=['GET'])
@@ -85,19 +91,60 @@ def api_listar_reservas():
         def reserva_to_dict(r):
             try:
                 fecha = r.get_fecha()
-                fecha_iso = fecha.isoformat() if fecha else None
+                fecha_iso = fecha.isoformat() if fecha else getattr(r, 'fecha', None)
             except Exception:
-                fecha_iso = None
+                fecha_iso = getattr(r, 'fecha', None)
+
+            raw_horarios = getattr(r, 'horarios', None) or []
+            horarios_out = []
+            for h in raw_horarios:
+                try:
+                    if isinstance(h, dict):
+                        horarios_out.append({
+                            'id': h.get('id'),
+                            'inicio': h.get('inicio'),
+                            'fin': h.get('fin')
+                        })
+                    else:
+                        inicio = h.get_hora_desde() if hasattr(h, 'get_hora_desde') else getattr(h, '_hora_desde', None)
+                        fin = h.get_hora_hasta() if hasattr(h, 'get_hora_hasta') else getattr(h, '_hora_hasta', None)
+                        if hasattr(inicio, 'isoformat'):
+                            inicio = inicio.isoformat()
+                        if hasattr(fin, 'isoformat'):
+                            fin = fin.isoformat()
+                        horarios_out.append({
+                            'id': h.get_id() if hasattr(h, 'get_id') else getattr(h, '_id', None),
+                            'inicio': inicio,
+                            'fin': fin
+                        })
+                except Exception:
+                    # skip problematic horario entries
+                    pass
+
+            horarios_label = getattr(r, 'horarios_label', None)
+
+            cancha_id = None
+            try:
+                cancha_id = r.get_cancha_id() if hasattr(r, 'get_cancha_id') else getattr(r, 'cancha_id', None)
+            except Exception:
+                cancha_id = getattr(r, 'cancha_id', None)
+
+            cliente_dni = None
+            try:
+                cliente_dni = r.get_cliente_dni() if hasattr(r, 'get_cliente_dni') else getattr(r, 'cliente_dni', None)
+            except Exception:
+                cliente_dni = getattr(r, 'cliente_dni', None)
+
             return {
                 'id': r.get_id() if hasattr(r, 'get_id') else getattr(r, 'id', None),
-                'cancha_id': r.get_cancha_id() if hasattr(r, 'get_cancha_id') else getattr(r, 'cancha', {}).get('id', None) if isinstance(getattr(r, 'cancha', None), dict) else getattr(r, 'cancha', None).id if getattr(r, 'cancha', None) else None,
+                'cancha_id': cancha_id,
                 'cancha_nombre': getattr(r, 'cancha_nombre', None),
-                'cliente_dni': getattr(r, 'cliente', None).get_dni() if getattr(r, 'cliente', None) and hasattr(r.cliente, 'get_dni') else getattr(r, 'cliente_dni', None),
+                'cliente_dni': cliente_dni,
                 'cliente_nombre': getattr(r, 'cliente_nombre', None),
-                'inicio': getattr(r, 'inicio', None),
-                'fin': getattr(r, 'fin', None),
                 'precio': r.get_precio_final() if hasattr(r, 'get_precio_final') else getattr(r, 'precio_final', None),
                 'fecha': fecha_iso,
+                'horarios': horarios_out,
+                'horarios_label': horarios_label,
             }
 
         return jsonify([reserva_to_dict(r) for r in reservas])
@@ -108,7 +155,7 @@ def api_listar_reservas():
 @app.route('/reservas', methods=['POST'])
 def api_crear_reserva():
     payload = request.get_json()
-    required = ['cancha_id', 'cliente_dni', 'inicio', 'fin', 'precio']
+    # Expect: cancha_id, cliente_dni, fecha (YYYY-MM-DD), horario_ids (list or single), precio
     if not payload:
         return jsonify({'error': 'Body JSON requerido'}), 400
 
@@ -116,18 +163,9 @@ def api_crear_reserva():
     if 'cliente_dni' not in payload:
         return jsonify({'error': 'Se requiere cliente_dni'}), 400
 
-    # Validate basic fields
-    if 'cancha_id' not in payload or 'inicio' not in payload or 'fin' not in payload or 'precio' not in payload:
-        return jsonify({'error': 'Faltan campos en el body. Se requieren: cancha_id, inicio, fin, precio y cliente_dni'}), 400
-
-    cancha_id = payload['cancha_id']
-    inicio = payload['inicio']
-    fin = payload['fin']
-    precio = payload['precio']
-
-    # verificar disponibilidad
-    if not repositorio.verificar_disponibilidad(cancha_id, inicio, fin):
-        return jsonify({'error': 'Cancha no disponible en el periodo solicitado'}), 409
+    # Validate basic fields (fecha + horario_ids)
+    if 'cancha_id' not in payload or 'fecha' not in payload or ('horario_ids' not in payload and 'horario_id' not in payload) or 'precio' not in payload:
+        return jsonify({'error': 'Faltan campos en el body. Se requieren: cancha_id, fecha, horario_ids (o horario_id), precio y cliente_dni'}), 400
 
     try:
         # Use DNI-based creation (will create cliente if missing)
