@@ -48,3 +48,6 @@ Cambios recientes: soporte de DNI
 - Si tienes una base existente, realiza la migración manualmente: añade la columna `dni` a la tabla `cliente` y actualiza los valores para cada fila, o recrea la base usando `db/schema.sql` y `db/seed.sql`.
 
 Después de esto, las APIs que devuelven reservas incluirán `cliente_dni` y podés crear reservas enviando `cliente_dni` en el body de la petición.
+
+
+.\TP_Canchas\.venv\Scripts\python.exe -m TP_Canchas.api.app

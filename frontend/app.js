@@ -21,12 +21,26 @@ async function listarCanchas() {
   canchasCache = canchas;
     canchas.forEach(c => {
       const item = document.createElement('div');
-      item.className = 'list-group-item';
-      // safe accessors: API returns plain objects with id, nombre, precio_por_hora
+      item.className = 'list-group-item d-flex justify-content-between align-items-center';
       const cid = c.id ?? (c.get_id ? c.get_id() : '');
       const nombre = c.nombre ?? `Cancha ${cid}`;
       const precio = c.precio_por_hora ?? (c.get_precio ? c.get_precio() : '');
-      item.textContent = `${nombre} — $${precio}`;
+      const left = document.createElement('div');
+      left.textContent = `${nombre} — $${precio}`;
+      const actions = document.createElement('div');
+      actions.className = 'btn-group';
+      const btnEdit = document.createElement('button');
+      btnEdit.className = 'btn btn-sm btn-outline-primary';
+      btnEdit.textContent = 'Editar';
+      btnEdit.addEventListener('click', () => showEditCancha(cid));
+      const btnDelete = document.createElement('button');
+      btnDelete.className = 'btn btn-sm btn-outline-danger';
+      btnDelete.textContent = 'Eliminar';
+      btnDelete.addEventListener('click', () => eliminarCancha(cid));
+      actions.appendChild(btnEdit);
+      actions.appendChild(btnDelete);
+      item.appendChild(left);
+      item.appendChild(actions);
       listEl.appendChild(item);
 
       const opt = document.createElement('option');
@@ -36,6 +50,144 @@ async function listarCanchas() {
     });
   } catch (err) {
     listEl.innerHTML = `<div class="text-danger">Error cargando canchas: ${err.message}</div>`;
+  }
+}
+
+// --- Canchas CRUD UI handlers ---
+function resetCanchaForm() {
+  document.getElementById('cancha-id').value = '';
+  const tipoSel = document.getElementById('cancha-tipo');
+  if (tipoSel) tipoSel.value = '';
+  const svc = document.getElementById('cancha-servicios');
+  if (svc) {
+    Array.from(svc.options).forEach(o => o.selected = false);
+  }
+}
+
+async function showCreateCancha() {
+  document.getElementById('cancha-form-title').textContent = 'Crear cancha';
+  resetCanchaForm();
+  // show the form immediately so UI is responsive; load selects in background
+  const container = document.getElementById('cancha-form-container');
+  if (container) container.classList.remove('d-none');
+  try {
+    // load services and tipos concurrently; failures shouldn't block the form
+    await Promise.allSettled([awaitLoadServicesForForm(), awaitLoadTiposForForm()]);
+  } catch (err) {
+    console.error('Error cargando datos del formulario de cancha:', err);
+  }
+}
+
+async function showEditCancha(canchaId) {
+  // fetch cancha details from API (includes servicios)
+  let cancha;
+  try {
+    cancha = await fetchJSON(`/canchas/${canchaId}`);
+  } catch (err) {
+    alert('Error cargando cancha: ' + err.message);
+    return;
+  }
+  document.getElementById('cancha-form-title').textContent = 'Editar cancha ' + canchaId;
+  document.getElementById('cancha-id').value = canchaId;
+  // load tipos and services into form and mark selected ones
+  awaitLoadTiposForForm(cancha.tipo_cancha_id || null);
+  awaitLoadServicesForForm(cancha.servicios || []);
+  document.getElementById('cancha-form-container').classList.remove('d-none');
+}
+
+async function crearActualizarCancha(e) {
+  e.preventDefault();
+  const idVal = document.getElementById('cancha-id').value;
+  const tipo = parseInt(document.getElementById('cancha-tipo').value, 10);
+  if (!tipo) {
+    alert('Tipo de cancha es requerido');
+    return;
+  }
+  const svcSel = document.getElementById('cancha-servicios');
+  const servicio_ids = svcSel ? Array.from(svcSel.selectedOptions).filter(o => o.value).map(o => parseInt(o.value, 10)) : [];
+  const payload = { tipo_cancha_id: tipo, servicio_ids };
+  try {
+    if (idVal) {
+      await fetchJSON(`/canchas/${idVal}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    } else {
+      await fetchJSON('/canchas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    }
+    document.getElementById('cancha-form-container').classList.add('d-none');
+    listarCanchas();
+  } catch (err) {
+    alert('Error guardando cancha: ' + err.message);
+  }
+}
+
+
+// Load servicios into the cancha form. If `selected` provided, mark those ids selected.
+async function awaitLoadServicesForForm(selected = []) {
+  const svcEl = document.getElementById('cancha-servicios');
+  if (!svcEl) return;
+  try {
+    const servicios = await fetchJSON('/servicios');
+    svcEl.innerHTML = '';
+    servicios.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = `${s.nombre} — $${s.precio}`;
+      if (selected.find(sel => sel.id == s.id)) opt.selected = true;
+      svcEl.appendChild(opt);
+    });
+  } catch (err) {
+    svcEl.innerHTML = '<option value="">Error cargando servicios</option>';
+  }
+}
+
+async function awaitLoadTiposForForm(selectedTipoId = null) {
+  const sel = document.getElementById('cancha-tipo');
+  if (!sel) return;
+  try {
+    const tipos = await fetchJSON('/tipos_cancha');
+    sel.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = '-- Seleccione tipo --';
+    sel.appendChild(placeholder);
+    tipos.forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t.id;
+      opt.textContent = `${t.nombre} — $${t.precio}`;
+      if (selectedTipoId && t.id == selectedTipoId) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  } catch (err) {
+    console.error('Error cargando tipos:', err);
+  }
+}
+
+async function eliminarCancha(canchaId) {
+  if (!confirm('Eliminar cancha #' + canchaId + '? Esta acción borra reservas asociadas.')) return;
+  try {
+    await fetchJSON(`/canchas/${canchaId}`, { method: 'DELETE' });
+    listarCanchas();
+  } catch (err) {
+    alert('Error eliminando cancha: ' + err.message);
+  }
+}
+
+async function aplicarFiltroCanchas() {
+  const tipo = document.getElementById('filter-tipo').value;
+  const minp = document.getElementById('filter-min-precio').value;
+  const maxp = document.getElementById('filter-max-precio').value;
+  const params = new URLSearchParams();
+  if (tipo) params.append('tipo_cancha_id', tipo);
+  if (minp) params.append('min_precio', minp);
+  if (maxp) params.append('max_precio', maxp);
+  const listEl = document.getElementById('canchas-list');
+  listEl.innerHTML = 'Cargando...';
+  try {
+    const canchas = await fetchJSON('/canchas?' + params.toString());
+    // reuse listarCanchas rendering by temporarily overriding canchasCache usage
+    canchasCache = canchas;
+    listarCanchas();
+  } catch (err) {
+    listEl.innerHTML = `<div class="text-danger">Error al buscar canchas: ${err.message}</div>`;
   }
 }
 
@@ -218,6 +370,26 @@ window.addEventListener('load', () => {
   document.getElementById('btn-canchas').addEventListener('click', () => { show('canchas-section'); listarCanchas(); });
   document.getElementById('btn-reservar').addEventListener('click', () => { show('reserva-section'); });
   document.getElementById('btn-clientes').addEventListener('click', () => { show('clientes-section'); listarClientes(); });
+  // canchas UI hooks
+  const btnCrear = document.getElementById('btn-crear-cancha');
+  if (btnCrear) btnCrear.addEventListener('click', async () => {
+    console.log('btn-crear-cancha clicked');
+    show('canchas-section');
+    try {
+      await showCreateCancha();
+    } catch (err) {
+      console.error('Error en showCreateCancha():', err);
+      // ensure form is visible even on error
+      const container = document.getElementById('cancha-form-container');
+      if (container) container.classList.remove('d-none');
+    }
+  });
+  const btnFiltrar = document.getElementById('btn-filtrar-canchas');
+  if (btnFiltrar) btnFiltrar.addEventListener('click', aplicarFiltroCanchas);
+  const canchaForm = document.getElementById('cancha-form');
+  if (canchaForm) canchaForm.addEventListener('submit', crearActualizarCancha);
+  const canchaCancel = document.getElementById('cancha-cancel');
+  if (canchaCancel) canchaCancel.addEventListener('click', () => document.getElementById('cancha-form-container').classList.add('d-none'));
   // reservas view
   const btnReservas = document.getElementById('btn-reservas');
   if (btnReservas) btnReservas.addEventListener('click', () => { show('reservas-section'); listarReservas(); });
