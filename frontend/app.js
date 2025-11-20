@@ -58,18 +58,32 @@ function resetCanchaForm() {
   document.getElementById('cancha-id').value = '';
   const tipoSel = document.getElementById('cancha-tipo');
   if (tipoSel) tipoSel.value = '';
-  const svc = document.getElementById('cancha-servicios');
-  if (svc) {
-    Array.from(svc.options).forEach(o => o.selected = false);
+  // reset custom multiselect (checkboxes) and button label
+  const menu = document.getElementById('cancha-servicios-menu');
+  if (menu) {
+    Array.from(menu.querySelectorAll('input[type=checkbox]')).forEach(cb => cb.checked = false);
   }
+  const btn = document.getElementById('cancha-servicios-button');
+  if (btn) btn.textContent = 'Seleccionar servicios';
+}
+
+function openCanchaModal() {
+  const modal = document.getElementById('cancha-modal');
+  if (modal) modal.classList.remove('d-none');
+}
+
+function closeCanchaModal() {
+  const modal = document.getElementById('cancha-modal');
+  if (modal) modal.classList.add('d-none');
+  // reset form for next use
+  try { resetCanchaForm(); } catch (e) { /* ignore */ }
 }
 
 async function showCreateCancha() {
   document.getElementById('cancha-form-title').textContent = 'Crear cancha';
   resetCanchaForm();
   // show the form immediately so UI is responsive; load selects in background
-  const container = document.getElementById('cancha-form-container');
-  if (container) container.classList.remove('d-none');
+  openCanchaModal();
   try {
     // load services and tipos concurrently; failures shouldn't block the form
     await Promise.allSettled([awaitLoadServicesForForm(), awaitLoadTiposForForm()]);
@@ -92,7 +106,7 @@ async function showEditCancha(canchaId) {
   // load tipos and services into form and mark selected ones
   awaitLoadTiposForForm(cancha.tipo_cancha_id || null);
   awaitLoadServicesForForm(cancha.servicios || []);
-  document.getElementById('cancha-form-container').classList.remove('d-none');
+  openCanchaModal();
 }
 
 async function crearActualizarCancha(e) {
@@ -103,8 +117,12 @@ async function crearActualizarCancha(e) {
     alert('Tipo de cancha es requerido');
     return;
   }
-  const svcSel = document.getElementById('cancha-servicios');
-  const servicio_ids = svcSel ? Array.from(svcSel.selectedOptions).filter(o => o.value).map(o => parseInt(o.value, 10)) : [];
+  // collect selected servicio ids from multiselect menu
+  const menu = document.getElementById('cancha-servicios-menu');
+  let servicio_ids = [];
+  if (menu) {
+    servicio_ids = Array.from(menu.querySelectorAll('input[type=checkbox]:checked')).map(cb => parseInt(cb.getAttribute('data-id'), 10));
+  }
   const payload = { tipo_cancha_id: tipo, servicio_ids };
   try {
     if (idVal) {
@@ -112,7 +130,7 @@ async function crearActualizarCancha(e) {
     } else {
       await fetchJSON('/canchas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     }
-    document.getElementById('cancha-form-container').classList.add('d-none');
+    closeCanchaModal();
     listarCanchas();
   } catch (err) {
     alert('Error guardando cancha: ' + err.message);
@@ -122,21 +140,74 @@ async function crearActualizarCancha(e) {
 
 // Load servicios into the cancha form. If `selected` provided, mark those ids selected.
 async function awaitLoadServicesForForm(selected = []) {
-  const svcEl = document.getElementById('cancha-servicios');
-  if (!svcEl) return;
+  const menu = document.getElementById('cancha-servicios-menu');
+  const btn = document.getElementById('cancha-servicios-button');
+  if (!menu || !btn) return;
   try {
     const servicios = await fetchJSON('/servicios');
-    svcEl.innerHTML = '';
+    menu.innerHTML = '';
+    // normalize selected ids array
+    let selectedIds = new Set();
+    try {
+      if (Array.isArray(selected) && selected.length > 0) {
+        // selected may be array of objects {id,...} or ids
+        selected.forEach(s => {
+          if (s && typeof s === 'object' && 'id' in s) selectedIds.add(Number(s.id));
+          else selectedIds.add(Number(s));
+        });
+      }
+    } catch (e) { /* ignore */ }
+
     servicios.forEach(s => {
-      const opt = document.createElement('option');
-      opt.value = s.id;
-      opt.textContent = `${s.nombre} — $${s.precio}`;
-      if (selected.find(sel => sel.id == s.id)) opt.selected = true;
-      svcEl.appendChild(opt);
+      const id = s.id;
+      const label = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.setAttribute('data-id', id);
+      cb.value = id;
+      if (selectedIds.has(Number(id))) cb.checked = true;
+      cb.addEventListener('change', () => updateServiciosButtonLabel());
+      label.appendChild(cb);
+      const span = document.createElement('span');
+      span.textContent = ` ${s.nombre} — $${s.precio}`;
+      label.appendChild(span);
+      menu.appendChild(label);
     });
+
+    // update button label to show selected count/names
+    updateServiciosButtonLabel();
   } catch (err) {
-    svcEl.innerHTML = '<option value="">Error cargando servicios</option>';
+    menu.innerHTML = '<div class="text-danger">Error cargando servicios</div>';
   }
+}
+
+function updateServiciosButtonLabel() {
+  const menu = document.getElementById('cancha-servicios-menu');
+  const btn = document.getElementById('cancha-servicios-button');
+  if (!menu || !btn) return;
+  const checked = Array.from(menu.querySelectorAll('input[type=checkbox]:checked'));
+  if (checked.length === 0) {
+    btn.textContent = 'Seleccionar servicios';
+  } else if (checked.length === 1) {
+    const label = checked[0].nextSibling ? checked[0].nextSibling.textContent.trim() : '1 seleccionado';
+    btn.textContent = label;
+  } else {
+    btn.textContent = `${checked.length} servicios seleccionados`;
+  }
+}
+
+// toggle menu open/close
+function toggleServiciosMenu() {
+  const menu = document.getElementById('cancha-servicios-menu');
+  if (!menu) return;
+  menu.classList.toggle('d-none');
+}
+
+// close servicios menu
+function closeServiciosMenu() {
+  const menu = document.getElementById('cancha-servicios-menu');
+  if (!menu) return;
+  menu.classList.add('d-none');
 }
 
 async function awaitLoadTiposForForm(selectedTipoId = null) {
@@ -379,9 +450,8 @@ window.addEventListener('load', () => {
       await showCreateCancha();
     } catch (err) {
       console.error('Error en showCreateCancha():', err);
-      // ensure form is visible even on error
-      const container = document.getElementById('cancha-form-container');
-      if (container) container.classList.remove('d-none');
+      // ensure modal is visible even on error
+      openCanchaModal();
     }
   });
   const btnFiltrar = document.getElementById('btn-filtrar-canchas');
@@ -389,7 +459,7 @@ window.addEventListener('load', () => {
   const canchaForm = document.getElementById('cancha-form');
   if (canchaForm) canchaForm.addEventListener('submit', crearActualizarCancha);
   const canchaCancel = document.getElementById('cancha-cancel');
-  if (canchaCancel) canchaCancel.addEventListener('click', () => document.getElementById('cancha-form-container').classList.add('d-none'));
+  if (canchaCancel) canchaCancel.addEventListener('click', () => closeCanchaModal());
   // reservas view
   const btnReservas = document.getElementById('btn-reservas');
   if (btnReservas) btnReservas.addEventListener('click', () => { show('reservas-section'); listarReservas(); });
@@ -397,6 +467,18 @@ window.addEventListener('load', () => {
   document.querySelectorAll('.btn-back').forEach(b => b.addEventListener('click', () => show('main-menu')));
   // initial view: main menu
   show('main-menu');
+});
+
+// handlers para cerrar modal por backdrop o boton
+document.addEventListener('click', (e) => {
+  const modal = document.getElementById('cancha-modal');
+  if (!modal || modal.classList.contains('d-none')) return;
+  // si clickean el backdrop o el boton close
+  const backdrop = document.getElementById('cancha-modal-backdrop');
+  const closeBtn = document.getElementById('cancha-modal-close');
+  if (e.target === backdrop || e.target === closeBtn) {
+    closeCanchaModal();
+  }
 });
 
 async function listarClientes() {
