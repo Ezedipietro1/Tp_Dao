@@ -233,11 +233,37 @@ async function awaitLoadTiposForForm(selectedTipoId = null) {
 }
 
 async function eliminarCancha(canchaId) {
-  if (!confirm('Eliminar cancha #' + canchaId + '? Esta acción borra reservas asociadas.')) return;
+  // show our custom confirm modal
+  showDeleteCanchaModal(canchaId);
+}
+
+let pendingDeleteCanchaId = null;
+
+function showDeleteCanchaModal(canchaId, canchaNombre) {
+  pendingDeleteCanchaId = canchaId;
+  const modal = document.getElementById('delete-cancha-modal');
+  const msg = document.getElementById('delete-cancha-message');
+  if (msg) {
+    const namePart = canchaNombre ? ` ${canchaNombre}` : '';
+    msg.textContent = `Eliminar cancha #${canchaId}? Esta acción borrará las reservas asociadas.`;
+  }
+  if (modal) modal.classList.remove('d-none');
+}
+
+function closeDeleteCanchaModal() {
+  pendingDeleteCanchaId = null;
+  const modal = document.getElementById('delete-cancha-modal');
+  if (modal) modal.classList.add('d-none');
+}
+
+async function confirmDeleteCancha() {
+  if (!pendingDeleteCanchaId) return closeDeleteCanchaModal();
   try {
-    await fetchJSON(`/canchas/${canchaId}`, { method: 'DELETE' });
+    await fetchJSON(`/canchas/${pendingDeleteCanchaId}`, { method: 'DELETE' });
+    closeDeleteCanchaModal();
     listarCanchas();
   } catch (err) {
+    closeDeleteCanchaModal();
     alert('Error eliminando cancha: ' + err.message);
   }
 }
@@ -331,62 +357,8 @@ async function listarHorarios(canchaId, fecha) {
 }
 
 // NOTE: manual datetime inputs were removed; reservas must be created via fecha + horario
-
-async function crearReserva(e) {
-  e.preventDefault();
-  const resultEl = document.getElementById('reserva-result');
-  resultEl.innerHTML = '';
-  const canchaId = parseInt(document.getElementById('cancha-select').value, 10);
-  const clienteDni = document.getElementById('cliente-dni').value.trim();
-  // determine inicio/fin: if horario selected + fecha, build from that; otherwise use manual datetime inputs
-  // collect one or more selected horarios
-  const horarioSelectEl = document.getElementById('horario-select');
-  const selectedOptions = Array.from(horarioSelectEl.selectedOptions).filter(o => o.value);
-  if (selectedOptions.length === 0) {
-    resultEl.innerHTML = '<div class="text-danger">Debés seleccionar al menos un horario.</div>';
-    return;
-  }
-  const fecha = document.getElementById('fecha-select').value; // YYYY-MM-DD
-  if (!fecha) {
-    resultEl.innerHTML = '<div class="text-danger">Debés indicar la fecha para la reserva.</div>';
-    return;
-  }
-  // validate fecha not before today
-  const today = new Date();
-  const selDate = new Date(fecha + 'T00:00:00');
-  if (selDate.setHours(0,0,0,0) < new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) {
-    resultEl.innerHTML = '<div class="text-danger">La fecha no puede ser anterior al día de hoy.</div>';
-    return;
-  }
-  // ensure none of the selected options is disabled
-  for (const opt of selectedOptions) {
-    if (opt.disabled) {
-      resultEl.innerHTML = '<div class="text-danger">Algunos horarios seleccionados no están disponibles (son anteriores a la hora actual).</div>';
-      return;
-    }
-  }
-  const horario_objs = selectedOptions.map(o => JSON.parse(o.value));
-  const horario_ids = horario_objs.map(h => h.id);
-  const precio = parseFloat(document.getElementById('precio').value);
-
-  if (!canchaId || !clienteDni || !fecha || horario_ids.length === 0 || isNaN(precio)) {
-    resultEl.innerHTML = '<div class="text-danger">Completar todos los campos requeridos.</div>';
-    return;
-  }
-
-  const payload = { cancha_id: canchaId, fecha: fecha, horario_ids: horario_ids, precio };
-  payload.cliente_dni = clienteDni;
-
-  try {
-    const data = await fetchJSON('/reservas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    resultEl.innerHTML = `<div class="text-success">Reserva creada. ID: ${data.reserva_id}</div>`;
-  } catch (err) {
-    // try to extract server message
-    resultEl.innerHTML = `<div class="text-danger">Error: ${err.message}</div>`;
-  }
-}
-
-document.getElementById('reserva-form').addEventListener('submit', crearReserva);
+// The form submit is handled by crearActualizarReserva (supports create and edit).
+document.getElementById('reserva-form').addEventListener('submit', crearActualizarReserva);
 document.getElementById('cancha-select').addEventListener('change', (e) => {
   const v = parseInt(e.target.value, 10);
   const fecha = document.getElementById('fecha-select').value;
@@ -428,6 +400,27 @@ window.addEventListener('load', () => {
     horarioSelect.innerHTML = '<option value="">-- seleccionar fecha primero --</option>';
     horarioSelect.disabled = true;
   }
+  // delete-confirm modal handlers
+  const delConfirm = document.getElementById('delete-cancha-confirm');
+  const delCancel = document.getElementById('delete-cancha-cancel');
+  const delClose = document.getElementById('delete-cancha-modal-close');
+  if (delConfirm) delConfirm.addEventListener('click', () => confirmDeleteCancha());
+  if (delCancel) delCancel.addEventListener('click', () => closeDeleteCanchaModal());
+  if (delClose) delClose.addEventListener('click', () => closeDeleteCanchaModal());
+  // delete-reserva modal handlers
+  const delResConfirm = document.getElementById('delete-reserva-confirm');
+  const delResCancel = document.getElementById('delete-reserva-cancel');
+  const delResClose = document.getElementById('delete-reserva-modal-close');
+  if (delResConfirm) delResConfirm.addEventListener('click', () => confirmDeleteReserva());
+  if (delResCancel) delResCancel.addEventListener('click', () => closeDeleteReservaModal());
+  if (delResClose) delResClose.addEventListener('click', () => closeDeleteReservaModal());
+  // reserva modal handlers (close/cancel)
+  const reservaClose = document.getElementById('reserva-modal-close');
+  const reservaBackdrop = document.getElementById('reserva-modal-backdrop');
+  const reservaCancel = document.getElementById('reserva-cancel');
+  if (reservaClose) reservaClose.addEventListener('click', () => closeReservaModal());
+  if (reservaCancel) reservaCancel.addEventListener('click', () => closeReservaModal());
+  if (reservaBackdrop) reservaBackdrop.addEventListener('click', () => closeReservaModal());
   // navigation buttons
   const show = (id) => {
     // hide all content sections
@@ -439,7 +432,18 @@ window.addEventListener('load', () => {
     if (target) target.classList.remove('d-none');
   };
   document.getElementById('btn-canchas').addEventListener('click', () => { show('canchas-section'); listarCanchas(); });
-  document.getElementById('btn-reservar').addEventListener('click', () => { show('reserva-section'); });
+  const btnCrearReserva = document.getElementById('btn-crear-reserva');
+  if (btnCrearReserva) btnCrearReserva.addEventListener('click', () => {
+    // open reservation modal for creating a new reserva
+    document.getElementById('reserva-form-title').textContent = 'Crear reserva';
+    openReservaModal();
+    try { document.getElementById('reserva-form').reset(); } catch (e) {}
+    editingReservaId = null;
+    const horarioSelect = document.getElementById('horario-select');
+    if (horarioSelect) { horarioSelect.innerHTML = '<option value="">-- seleccionar horario --</option>'; horarioSelect.disabled = true; }
+    // load clients list into the select
+    try { populateClientesSelect(); } catch (e) { console.error('Error cargando clientes para crear reserva', e); }
+  });
   document.getElementById('btn-clientes').addEventListener('click', () => { show('clientes-section'); listarClientes(); });
   // canchas UI hooks
   const btnCrear = document.getElementById('btn-crear-cancha');
@@ -460,6 +464,28 @@ window.addEventListener('load', () => {
   if (canchaForm) canchaForm.addEventListener('submit', crearActualizarCancha);
   const canchaCancel = document.getElementById('cancha-cancel');
   if (canchaCancel) canchaCancel.addEventListener('click', () => closeCanchaModal());
+  // clientes UI hooks
+  const btnCrearCliente = document.getElementById('btn-crear-cliente');
+  if (btnCrearCliente) btnCrearCliente.addEventListener('click', async () => { show('clientes-section'); try { await showCreateCliente(); } catch (e) { openClienteModal(); } });
+  const clienteForm = document.getElementById('cliente-form');
+  if (clienteForm) clienteForm.addEventListener('submit', crearActualizarCliente);
+  const clienteCancel = document.getElementById('cliente-cancel');
+  if (clienteCancel) clienteCancel.addEventListener('click', () => closeClienteModal());
+  const clienteClose = document.getElementById('cliente-modal-close');
+  if (clienteClose) clienteClose.addEventListener('click', () => closeClienteModal());
+  // delete cliente modal handlers
+  const delCliConfirm = document.getElementById('delete-cliente-confirm');
+  const delCliCancel = document.getElementById('delete-cliente-cancel');
+  const delCliClose = document.getElementById('delete-cliente-modal-close');
+  if (delCliConfirm) delCliConfirm.addEventListener('click', () => confirmDeleteCliente());
+  if (delCliCancel) delCliCancel.addEventListener('click', () => closeDeleteClienteModal());
+  if (delCliClose) delCliClose.addEventListener('click', () => closeDeleteClienteModal());
+  // wire delete-reserva backdrop as well
+  const delResModal = document.getElementById('delete-reserva-modal');
+  if (delResModal) {
+    const delResBackdrop = delResModal.querySelector('.modal-backdrop');
+    if (delResBackdrop) delResBackdrop.addEventListener('click', () => closeDeleteReservaModal());
+  }
   // reservas view
   const btnReservas = document.getElementById('btn-reservas');
   if (btnReservas) btnReservas.addEventListener('click', () => { show('reservas-section'); listarReservas(); });
@@ -467,17 +493,81 @@ window.addEventListener('load', () => {
   document.querySelectorAll('.btn-back').forEach(b => b.addEventListener('click', () => show('main-menu')));
   // initial view: main menu
   show('main-menu');
+  // Event delegation fallback for reservas list (handles Edit/Delete clicks reliably)
+  const reservasList = document.getElementById('reservas-list');
+  if (reservasList) {
+    reservasList.addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button');
+      if (!btn || !reservasList.contains(btn)) return;
+      // try data attributes first
+      const action = btn.getAttribute('data-action');
+      const id = btn.getAttribute('data-id');
+      if (action === 'edit' && id) {
+        try { showEditReserva(Number(id)); } catch (e) { console.error(e); }
+      } else if (action === 'delete' && id) {
+        try { eliminarReserva(Number(id)); } catch (e) { console.error(e); }
+      }
+    });
+  }
+});
+
+// Global click handler to close reserva modal when clicking backdrop or close
+document.addEventListener('click', (e) => {
+  const resModal = document.getElementById('reserva-modal');
+  if (resModal && !resModal.classList.contains('d-none')) {
+    const backdrop = document.getElementById('reserva-modal-backdrop');
+    const closeBtn = document.getElementById('reserva-modal-close');
+    if (e.target === backdrop || e.target === closeBtn) {
+      closeReservaModal();
+      return;
+    }
+  }
 });
 
 // handlers para cerrar modal por backdrop o boton
 document.addEventListener('click', (e) => {
+  // cancha modal
   const modal = document.getElementById('cancha-modal');
-  if (!modal || modal.classList.contains('d-none')) return;
-  // si clickean el backdrop o el boton close
-  const backdrop = document.getElementById('cancha-modal-backdrop');
-  const closeBtn = document.getElementById('cancha-modal-close');
-  if (e.target === backdrop || e.target === closeBtn) {
-    closeCanchaModal();
+  if (modal && !modal.classList.contains('d-none')) {
+    const backdrop = document.getElementById('cancha-modal-backdrop');
+    const closeBtn = document.getElementById('cancha-modal-close');
+    if (e.target === backdrop || e.target === closeBtn) {
+      closeCanchaModal();
+      return;
+    }
+  }
+
+  // delete cancha modal
+  const delModal = document.getElementById('delete-cancha-modal');
+  if (delModal && !delModal.classList.contains('d-none')) {
+    const delBackdrop = delModal.querySelector('.modal-backdrop');
+    const delCloseBtn = document.getElementById('delete-cancha-modal-close');
+    if (e.target === delBackdrop || e.target === delCloseBtn) {
+      closeDeleteCanchaModal();
+      return;
+    }
+  }
+
+  // cliente modal
+  const cliModal = document.getElementById('cliente-modal');
+  if (cliModal && !cliModal.classList.contains('d-none')) {
+    const cliBackdrop = document.getElementById('cliente-modal-backdrop');
+    const cliCloseBtn = document.getElementById('cliente-modal-close');
+    if (e.target === cliBackdrop || e.target === cliCloseBtn) {
+      closeClienteModal();
+      return;
+    }
+  }
+
+  // delete cliente modal
+  const delCliModal = document.getElementById('delete-cliente-modal');
+  if (delCliModal && !delCliModal.classList.contains('d-none')) {
+    const delCliBackdrop = delCliModal.querySelector('.modal-backdrop');
+    const delCliCloseBtn = document.getElementById('delete-cliente-modal-close');
+    if (e.target === delCliBackdrop || e.target === delCliCloseBtn) {
+      closeDeleteClienteModal();
+      return;
+    }
   }
 });
 
@@ -488,13 +578,132 @@ async function listarClientes() {
     const clientes = await fetchJSON('/clientes');
     listEl.innerHTML = '';
     clientes.forEach(c => {
-      const item = document.createElement('div');
-      item.className = 'list-group-item';
-      item.textContent = `${c.dni} — ${c.nombre || ''} ${c.apellido || ''}`;
+        const item = document.createElement('div');
+        item.className = 'list-group-item d-flex justify-content-between align-items-center';
+        const left = document.createElement('div');
+        left.textContent = `${c.dni} — ${c.nombre || ''} — ${c.telefono || ''}`;
+      const actions = document.createElement('div');
+      actions.className = 'btn-group';
+      const btnEdit = document.createElement('button');
+      btnEdit.className = 'btn btn-sm btn-outline-primary';
+      btnEdit.textContent = 'Editar';
+      btnEdit.addEventListener('click', () => showEditCliente(c.dni));
+      const btnDelete = document.createElement('button');
+      btnDelete.className = 'btn btn-sm btn-outline-danger';
+      btnDelete.textContent = 'Eliminar';
+      btnDelete.addEventListener('click', () => eliminarCliente(c.dni));
+      actions.appendChild(btnEdit);
+      actions.appendChild(btnDelete);
+      item.appendChild(left);
+      item.appendChild(actions);
       listEl.appendChild(item);
     });
   } catch (err) {
     listEl.innerHTML = `<div class="text-danger">Error cargando clientes: ${err.message}</div>`;
+  }
+}
+
+// --- Clientes CRUD UI handlers ---
+function resetClienteForm() {
+  const dni = document.getElementById('cliente-dni'); if (dni) { dni.value = ''; dni.disabled = false; }
+  const nombre = document.getElementById('cliente-nombre'); if (nombre) nombre.value = '';
+  const telefono = document.getElementById('cliente-telefono'); if (telefono) telefono.value = '';
+  editingClienteDni = null;
+}
+
+function openClienteModal() {
+  const modal = document.getElementById('cliente-modal');
+  if (modal) modal.classList.remove('d-none');
+}
+
+function closeClienteModal() {
+  const modal = document.getElementById('cliente-modal');
+  if (modal) modal.classList.add('d-none');
+  try { resetClienteForm(); } catch (e) {}
+}
+
+async function showCreateCliente() {
+  document.getElementById('cliente-form-title').textContent = 'Crear cliente';
+  resetClienteForm();
+  openClienteModal();
+}
+
+let editingClienteDni = null;
+async function showEditCliente(dni) {
+  try {
+    const c = await fetchJSON(`/clientes/${encodeURIComponent(dni)}`);
+    document.getElementById('cliente-form-title').textContent = 'Editar cliente ' + dni;
+    const dniEl = document.getElementById('cliente-dni'); if (dniEl) { dniEl.value = c.dni; dniEl.disabled = true; }
+    const nombre = document.getElementById('cliente-nombre'); if (nombre) nombre.value = c.nombre || '';
+    const telefono = document.getElementById('cliente-telefono'); if (telefono) telefono.value = c.telefono || '';
+    editingClienteDni = dni;
+    openClienteModal();
+  } catch (err) {
+    alert('Error cargando cliente: ' + err.message);
+  }
+}
+
+async function crearActualizarCliente(e) {
+  e.preventDefault();
+  const dniEl = document.getElementById('cliente-dni');
+  const nombreEl = document.getElementById('cliente-nombre');
+  const telefonoEl = document.getElementById('cliente-telefono');
+  const dni = dniEl ? dniEl.value.trim() : '';
+  const nombre = nombreEl ? nombreEl.value.trim() : '';
+  const telefono = telefonoEl ? telefonoEl.value.trim() : '';
+  if (!dni || !nombre) {
+    alert('DNI y Nombre son requeridos');
+    return;
+  }
+  const payload = { nombre, telefono };
+  try {
+    if (editingClienteDni) {
+      // do not send dni in payload when updating; DNI is read-only
+      console.log('[CLIENTES] PUT payload ->', payload, 'url ->', `/clientes/${encodeURIComponent(editingClienteDni)}`);
+      const res = await fetchJSON(`/clientes/${encodeURIComponent(editingClienteDni)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      console.log('[CLIENTES] PUT response ->', res);
+    } else {
+      payload.dni = Number(dni);
+      console.log('[CLIENTES] POST payload ->', payload, 'url ->', '/clientes');
+      const res = await fetchJSON('/clientes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      console.log('[CLIENTES] POST response ->', res);
+    }
+    closeClienteModal();
+    // refresh list and log current clients
+    await listarClientes();
+    fetch('/clientes').then(r => r.json()).then(data => console.log('[CLIENTES] current list ->', data)).catch(e => console.error(e));
+  } catch (err) {
+    // If server returned JSON in the error body, try to show it
+    console.error('Error guardando cliente:', err);
+    alert('Error guardando cliente: ' + err.message + '\nVer consola para más detalles.');
+  }
+}
+
+// delete client flow
+let pendingDeleteClienteDni = null;
+function eliminarCliente(dni) {
+  pendingDeleteClienteDni = dni;
+  const modal = document.getElementById('delete-cliente-modal');
+  const msg = document.getElementById('delete-cliente-message');
+  if (msg) msg.textContent = `Eliminar cliente #${dni}? Esta acción es irreversible.`;
+  if (modal) modal.classList.remove('d-none');
+}
+
+function closeDeleteClienteModal() {
+  pendingDeleteClienteDni = null;
+  const modal = document.getElementById('delete-cliente-modal');
+  if (modal) modal.classList.add('d-none');
+}
+
+async function confirmDeleteCliente() {
+  if (!pendingDeleteClienteDni) return closeDeleteClienteModal();
+  try {
+    await fetchJSON(`/clientes/${encodeURIComponent(pendingDeleteClienteDni)}`, { method: 'DELETE' });
+    closeDeleteClienteModal();
+    listarClientes();
+  } catch (err) {
+    closeDeleteClienteModal();
+    alert('Error eliminando cliente: ' + err.message);
   }
 }
 
@@ -506,16 +715,187 @@ async function listarReservas() {
     listEl.innerHTML = '';
     reservas.forEach(r => {
       const item = document.createElement('div');
-      item.className = 'list-group-item';
+      item.className = 'list-group-item d-flex justify-content-between align-items-center';
       const fecha = r.fecha || '';
       const horariosLabel = (r.horarios_label && Array.isArray(r.horarios_label)) ? r.horarios_label.join(', ') : (r.horarios && Array.isArray(r.horarios) ? r.horarios.map(h => `${h.inicio}-${h.fin}`).join(', ') : '');
-      item.textContent = `#${r.id} — ${r.cancha_nombre || ('Cancha ' + (r.cancha_id||''))} — ${r.cliente_nombre||''} (${r.cliente_dni||''}) — ${fecha} — ${horariosLabel} — $${r.precio}`;
+      const left = document.createElement('div');
+      left.textContent = `#${r.id} — ${r.cancha_nombre || ('Cancha ' + (r.cancha_id||''))} — ${r.cliente_nombre||''} (${r.cliente_dni||''}) — ${fecha} — ${horariosLabel} — $${r.precio}`;
+      const actions = document.createElement('div');
+      actions.className = 'btn-group';
+      const btnEdit = document.createElement('button');
+      btnEdit.className = 'btn btn-sm btn-outline-primary';
+      btnEdit.textContent = 'Editar';
+      btnEdit.setAttribute('data-action', 'edit');
+      btnEdit.setAttribute('data-id', r.id);
+      btnEdit.addEventListener('click', () => {
+        try {
+          console.log('[UI] Edit reserva clicked:', r.id);
+          showEditReserva(r.id);
+        } catch (e) {
+          console.error('Error invoking showEditReserva:', e);
+          alert('Error al intentar editar la reserva. Ver consola para más detalles.');
+        }
+      });
+      const btnDelete = document.createElement('button');
+      btnDelete.className = 'btn btn-sm btn-outline-danger';
+      btnDelete.textContent = 'Eliminar';
+      btnDelete.setAttribute('data-action', 'delete');
+      btnDelete.setAttribute('data-id', r.id);
+      btnDelete.addEventListener('click', () => eliminarReserva(r.id));
+      actions.appendChild(btnEdit);
+      actions.appendChild(btnDelete);
+      item.appendChild(left);
+      item.appendChild(actions);
       listEl.appendChild(item);
     });
   } catch (err) {
     listEl.innerHTML = `<div class="text-danger">Error cargando reservas: ${err.message}</div>`;
   }
 }
+
+// --- Reservas: editar/crear/eliminar usando el formulario existente ---
+let editingReservaId = null;
+async function showEditReserva(reservaId) {
+  try {
+    console.log('[UI] showEditReserva start for', reservaId);
+    const r = await fetchJSON(`/reservas/${reservaId}`);
+    console.log('[UI] showEditReserva fetched', r);
+    // open reservation modal and populate form
+    document.getElementById('reserva-form-title').textContent = 'Editar reserva ' + reservaId;
+    openReservaModal();
+    // set cancha select
+    const canchaSel = document.getElementById('cancha-select');
+    if (canchaSel) canchaSel.value = r.cancha_id || '';
+    // set fecha
+    const fechaEl = document.getElementById('fecha-select'); if (fechaEl) fechaEl.value = r.fecha || '';
+    // load horarios and mark selected
+    await listarHorarios(r.cancha_id, r.fecha);
+    const horarioSelect = document.getElementById('horario-select');
+    if (horarioSelect && Array.isArray(r.horarios)) {
+      // mark options whose JSON value id matches
+      Array.from(horarioSelect.options).forEach(opt => {
+        try {
+          const obj = JSON.parse(opt.value);
+          opt.selected = r.horarios.some(h => Number(h.id) === Number(obj.id));
+        } catch (e) {}
+      });
+    }
+    // set cliente select
+    await populateClientesSelect(r.cliente_dni);
+    // set precio
+    const precioEl = document.getElementById('precio'); if (precioEl) precioEl.value = r.precio || '';
+    editingReservaId = reservaId;
+  } catch (err) {
+    console.error('Error in showEditReserva:', err);
+    alert('Error cargando reserva: ' + err.message + '\nVer consola para más detalles.');
+  }
+}
+
+function openReservaModal() {
+  const modal = document.getElementById('reserva-modal');
+  if (modal) modal.classList.remove('d-none');
+}
+
+function closeReservaModal() {
+  const modal = document.getElementById('reserva-modal');
+  if (modal) modal.classList.add('d-none');
+  try { document.getElementById('reserva-form').reset(); } catch (e) {}
+}
+
+async function crearActualizarReserva(e) {
+  e.preventDefault();
+  const canchaId = parseInt(document.getElementById('cancha-select').value, 10);
+  const clienteSelect = document.getElementById('reserva-cliente-select');
+  const clienteDni = clienteSelect ? String(clienteSelect.value).trim() : '';
+  const fecha = document.getElementById('fecha-select').value;
+  const horarioSelectEl = document.getElementById('horario-select');
+  const selectedOptions = Array.from(horarioSelectEl.selectedOptions).filter(o => o.value && !o.disabled);
+  const horario_objs = selectedOptions.map(o => JSON.parse(o.value));
+  const horario_ids = horario_objs.map(h => h.id);
+  const precio = parseFloat(document.getElementById('precio').value);
+  if (!canchaId || !clienteDni || !fecha || horario_ids.length === 0 || isNaN(precio)) {
+    alert('Completar todos los campos requeridos para la reserva.');
+    return;
+  }
+  const payload = { cancha_id: canchaId, cliente_dni: clienteDni, fecha: fecha, horario_ids: horario_ids, precio };
+  try {
+    if (editingReservaId) {
+      console.log('[RESERVAS] PUT payload ->', payload, 'url ->', `/reservas/${editingReservaId}`);
+      const res = await fetchJSON(`/reservas/${editingReservaId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      console.log('[RESERVAS] PUT response ->', res);
+      editingReservaId = null;
+    } else {
+      console.log('[RESERVAS] POST payload ->', payload);
+      const res = await fetchJSON('/reservas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      console.log('[RESERVAS] POST response ->', res);
+    }
+    // close modal, reset form and refresh lists
+    closeReservaModal();
+    document.getElementById('reserva-form').reset();
+    const horarioSelect = document.getElementById('horario-select'); if (horarioSelect) { horarioSelect.innerHTML = '<option value="">-- seleccionar horario --</option>'; horarioSelect.disabled = true; }
+    try { await populateClientesSelect(); } catch (e) { /* ignore */ }
+    listarReservas();
+    listarCanchas();
+  } catch (err) {
+    console.error('Error guardando reserva:', err);
+    alert('Error guardando reserva: ' + err.message);
+  }
+}
+
+// populate clients dropdown for reservation form. If selectedDni provided, select it.
+async function populateClientesSelect(selectedDni = null) {
+  const sel = document.getElementById('reserva-cliente-select');
+  if (!sel) return;
+  try {
+    const clientes = await fetchJSON('/clientes');
+    sel.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = '-- seleccionar cliente --';
+    sel.appendChild(placeholder);
+    clientes.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.dni;
+      opt.textContent = `${c.dni} — ${c.nombre || ''}`;
+      if (selectedDni && String(selectedDni) === String(c.dni)) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  } catch (err) {
+    sel.innerHTML = '<option value="">Error cargando clientes</option>';
+  }
+}
+
+// delete reserva flow
+let pendingDeleteReservaId = null;
+function eliminarReserva(reservaId) {
+  pendingDeleteReservaId = reservaId;
+  const modal = document.getElementById('delete-reserva-modal');
+  const msg = document.getElementById('delete-reserva-message');
+  if (msg) msg.textContent = `Eliminar reserva #${reservaId}? Esta acción es irreversible.`;
+  if (modal) modal.classList.remove('d-none');
+}
+
+function closeDeleteReservaModal() {
+  pendingDeleteReservaId = null;
+  const modal = document.getElementById('delete-reserva-modal');
+  if (modal) modal.classList.add('d-none');
+}
+
+async function confirmDeleteReserva() {
+  if (!pendingDeleteReservaId) return closeDeleteReservaModal();
+  try {
+    await fetchJSON(`/reservas/${pendingDeleteReservaId}`, { method: 'DELETE' });
+    closeDeleteReservaModal();
+    listarReservas();
+  } catch (err) {
+    closeDeleteReservaModal();
+    alert('Error eliminando reserva: ' + err.message);
+  }
+}
+
+// close/reserva modal handlers (close button, cancel)
+const reservaCancelBtn = document.getElementById('reserva-cancel');
+if (reservaCancelBtn) reservaCancelBtn.addEventListener('click', () => closeReservaModal());
 
 // manual datetime inputs removed; no visibility toggling needed
 
@@ -560,3 +940,12 @@ function computeAndShowPrice() {
 }
 
 document.getElementById('horario-select').addEventListener('change', computeAndShowPrice);
+
+// expose helpers to global scope for debugging and inline onclick usage
+try {
+  window.toggleServiciosMenu = toggleServiciosMenu;
+  window.closeServiciosMenu = closeServiciosMenu;
+  window.updateServiciosButtonLabel = updateServiciosButtonLabel;
+} catch (e) {
+  // ignore in non-browser env
+}

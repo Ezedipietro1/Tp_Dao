@@ -15,7 +15,6 @@
       <h2>Inicio</h2>
       <div class="d-flex gap-2">
         <button id="btn-canchas" class="btn btn-primary">Canchas</button>
-        <button id="btn-reservar" class="btn btn-primary">Reservar cancha</button>
         <button id="btn-reservas" class="btn btn-primary">Reservas</button>
         <button id="btn-clientes" class="btn btn-primary">Clientes</button>
       </div>
@@ -36,48 +35,140 @@
     <section id="reserva-section" class="mb-4 d-none">
   <button class="btn btn-primary btn-back mb-2">← Volver</button>
       <h2>Crear reserva</h2>
-      <form id="reserva-form">
-        <div class="mb-3">
-          <label for="cancha-select" class="form-label">Cancha</label>
-          <select id="cancha-select" class="form-select"></select>
-        </div>
-        <div class="mb-3">
-          <label for="fecha-select" class="form-label">Fecha (si usás un horario)</label>
-          <input id="fecha-select" type="date" class="form-control">
-        </div>
-        <div class="mb-3">
-          <label for="horario-select" class="form-label">Horario disponible</label>
-          <select id="horario-select" class="form-select">
-            <option value="">-- seleccionar horario --</option>
-          </select>
-          <div class="form-text">Seleccioná una fecha arriba y luego un horario para autocompletar inicio/fin.</div>
-        </div>
-        <div class="mb-3">
-          <label class="form-label">Cliente (DNI)</label>
-          <input id="cliente-dni" type="text" class="form-control" placeholder="DNI (requerido)">
-        </div>
-        <!-- Ahora se elige fecha + horario; no hay entrada manual de inicio/fin -->
-        <div class="mb-3">
-          <label for="precio" class="form-label">Precio</label>
-          <!-- Precio calculado automáticamente: no editable -->
-          <input id="precio" type="text" class="form-control" placeholder="Precio total" readonly>
-        </div>
-        <button class="btn btn-primary" type="submit">Crear reserva</button>
-      </form>
-      <div id="reserva-result" class="mt-3"></div>
+      <p>Usá el botón "Crear reserva" para abrir el formulario en una ventana emergente.</p>
     </section>
 
     <section id="clientes-section" class="mb-4 d-none">
   <button class="btn btn-primary btn-back mb-2">← Volver</button>
       <h2>Clientes</h2>
+      <div class="mb-3 d-flex gap-2">
+        <button id="btn-crear-cliente" class="btn btn-success">Crear cliente</button>
+      </div>
       <div id="clientes-list" class="list-group"></div>
     </section>
+
+  <!-- Modal para crear/editar cliente -->
+  <div id="cliente-modal" class="modal-overlay d-none">
+    <div class="modal-backdrop" id="cliente-modal-backdrop"></div>
+    <div class="modal-box">
+      <div class="modal-header d-flex justify-content-between align-items-center">
+        <h3 id="cliente-form-title">Crear cliente</h3>
+        <button id="cliente-modal-close" class="btn-close" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <form id="cliente-form">
+          <div class="mb-2">
+            <label class="form-label">DNI</label>
+            <input id="cliente-dni" type="number" class="form-control" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Nombre</label>
+            <input id="cliente-nombre" type="text" class="form-control" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Teléfono</label>
+            <input id="cliente-telefono" type="text" class="form-control">
+          </div>
+          <div class="d-flex gap-2">
+            <button id="cliente-save" class="btn btn-primary" type="submit">Guardar</button>
+            <button id="cliente-cancel" class="btn btn-secondary" type="button">Cancelar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de confirmación para eliminar cliente -->
+  <div id="delete-cliente-modal" class="modal-overlay d-none">
+    <div class="modal-backdrop"></div>
+    <div class="modal-box">
+      <div class="modal-header d-flex justify-content-between align-items-center">
+        <h3>Confirmar eliminación</h3>
+        <button id="delete-cliente-modal-close" class="btn-close" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <p id="delete-cliente-message">¿Eliminar este cliente? Esta acción es irreversible.</p>
+        <div class="d-flex gap-2 mt-3">
+          <button id="delete-cliente-confirm" class="btn btn-danger">Aceptar</button>
+          <button id="delete-cliente-cancel" class="btn btn-secondary">Cancelar</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
     <section id="reservas-section" class="mb-4 d-none">
   <button class="btn btn-primary btn-back mb-2">← Volver</button>
       <h2>Reservas</h2>
+      <div class="mb-3 d-flex gap-2">
+        <button id="btn-crear-reserva" class="btn btn-success">Crear reserva</button>
+      </div>
       <div id="reservas-list" class="list-group"></div>
     </section>
+
+  <!-- Modal de confirmación para eliminar reserva -->
+  <div id="delete-reserva-modal" class="modal-overlay d-none">
+    <div class="modal-backdrop"></div>
+    <div class="modal-box">
+      <div class="modal-header d-flex justify-content-between align-items-center">
+        <h3>Confirmar eliminación</h3>
+        <button id="delete-reserva-modal-close" class="btn-close" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <p id="delete-reserva-message">¿Eliminar esta reserva? Esta acción borrará los datos asociados.</p>
+        <div class="d-flex gap-2 mt-3">
+          <button id="delete-reserva-confirm" class="btn btn-danger">Aceptar</button>
+          <button id="delete-reserva-cancel" class="btn btn-secondary">Cancelar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal para crear/editar reserva -->
+  <div id="reserva-modal" class="modal-overlay d-none">
+    <div class="modal-backdrop" id="reserva-modal-backdrop"></div>
+    <div class="modal-box">
+      <div class="modal-header d-flex justify-content-between align-items-center">
+        <h3 id="reserva-form-title">Crear reserva</h3>
+        <button id="reserva-modal-close" class="btn-close" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <form id="reserva-form">
+          <div class="mb-3">
+            <label for="cancha-select" class="form-label">Cancha</label>
+            <select id="cancha-select" class="form-select"></select>
+          </div>
+          <div class="mb-3">
+            <label for="fecha-select" class="form-label">Fecha (si usás un horario)</label>
+            <input id="fecha-select" type="date" class="form-control">
+          </div>
+          <div class="mb-3">
+            <label for="horario-select" class="form-label">Horario disponible</label>
+            <select id="horario-select" class="form-select">
+              <option value="">-- seleccionar horario --</option>
+            </select>
+            <div class="form-text">Seleccioná una fecha arriba y luego un horario para autocompletar inicio/fin.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Cliente</label>
+            <select id="reserva-cliente-select" class="form-select">
+              <option value="">-- seleccionar cliente --</option>
+            </select>
+          </div>
+          <!-- Ahora se elige fecha + horario; no hay entrada manual de inicio/fin -->
+          <div class="mb-3">
+            <label for="precio" class="form-label">Precio</label>
+            <!-- Precio calculado automáticamente: no editable -->
+            <input id="precio" type="text" class="form-control" placeholder="Precio total" readonly>
+          </div>
+          <div class="d-flex gap-2">
+            <button class="btn btn-primary" type="submit">Crear reserva</button>
+            <button id="reserva-cancel" class="btn btn-secondary" type="button">Cancelar</button>
+          </div>
+        </form>
+        <div id="reserva-result" class="mt-3"></div>
+      </div>
+    </div>
+  </div>
 
     
   <!-- Modal para crear/editar cancha (ahora dentro de #app-root) -->
@@ -100,7 +191,7 @@
           <div class="mb-2">
             <label class="form-label">Servicios (opcional)</label>
             <div class="multiselect">
-              <button id="cancha-servicios-button" type="button" class="btn btn-light form-control text-start">Seleccionar servicios</button>
+              <button id="cancha-servicios-button" type="button" class="btn btn-light form-control text-start" onclick="toggleServiciosMenu()">Seleccionar servicios</button>
               <div id="cancha-servicios-menu" class="multiselect-menu d-none">
                 <!-- items populated dynamically: each item: <label><input type="checkbox" data-id="..."> Nombre — $precio</label> -->
               </div>
@@ -112,6 +203,24 @@
             <button id="cancha-cancel" class="btn btn-secondary" type="button">Cancelar</button>
           </div>
         </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de confirmación para eliminar cancha -->
+  <div id="delete-cancha-modal" class="modal-overlay d-none">
+    <div class="modal-backdrop"></div>
+    <div class="modal-box">
+      <div class="modal-header d-flex justify-content-between align-items-center">
+        <h3>Confirmar eliminación</h3>
+        <button id="delete-cancha-modal-close" class="btn-close" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <p id="delete-cancha-message">¿Eliminar esta cancha? Esta acción borrará las reservas asociadas.</p>
+        <div class="d-flex gap-2 mt-3">
+          <button id="delete-cancha-confirm" class="btn btn-danger">Aceptar</button>
+          <button id="delete-cancha-cancel" class="btn btn-secondary">Cancelar</button>
+        </div>
       </div>
     </div>
   </div>

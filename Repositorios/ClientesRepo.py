@@ -17,5 +17,13 @@ def listar_clientes() -> List[Dict[str, Any]]:
     return fetchall(q)
 
 def actualizar_cliente(dni: str, cliente: Dict[str, Any]) -> int:
+    # Do not allow changing the DNI (primary key) here. Only update nombre and telefono.
+    nombre = cliente.get('nombre')
+    telefono = cliente.get('telefono')
     q = "UPDATE cliente SET nombre = ?, telefono = ? WHERE dni = ?"
-    return execute(q, (cliente.get('nombre'), cliente.get('telefono'), dni))
+    return execute(q, (nombre, telefono, dni))
+
+
+def eliminar_cliente(dni: str) -> int:
+    q = "DELETE FROM cliente WHERE dni = ?"
+    return execute(q, (dni,))

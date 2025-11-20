@@ -145,8 +145,25 @@ def actualizar_cancha(cancha_id: int, data: Dict[str, Any]) -> int:
 
 def eliminar_cancha(cancha_id: int) -> None:
     """Eliminar cancha y sus relaciones con servicios."""
+    # remove links to servicios
     execute("DELETE FROM cancha_x_servicio WHERE cancha_id = ?", (cancha_id,))
-    execute("DELETE FROM reserva WHERE cancha_id = ?", (cancha_id,))
+
+    # find reservas asociadas a esta cancha
+    reserva_rows = fetchall("SELECT id FROM reserva WHERE cancha_id = ?", (cancha_id,))
+    reserva_ids = [r.get('id') for r in reserva_rows] if reserva_rows else []
+
+    if reserva_ids:
+        # delete pagos asociados a esas reservas (pago.reserva_id -> reserva.id)
+        placeholders = ','.join('?' for _ in reserva_ids)
+        execute(f"DELETE FROM pago WHERE reserva_id IN ({placeholders})", tuple(reserva_ids))
+
+        # delete reserva_x_horario entries for esas reservas
+        execute(f"DELETE FROM reserva_x_horario WHERE reserva_id IN ({placeholders})", tuple(reserva_ids))
+
+        # finally delete las reservas
+        execute(f"DELETE FROM reserva WHERE id IN ({placeholders})", tuple(reserva_ids))
+
+    # delete the cancha
     execute("DELETE FROM cancha WHERE id = ?", (cancha_id,))
 
 

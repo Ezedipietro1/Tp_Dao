@@ -1,11 +1,15 @@
 /* Base */
-html, body { height: 100%; margin: 0; }
+html, body { 
+	height: 100%; 
+	margin: 0; 
+}
+
 body {
 	background: radial-gradient(circle at 10% 20%, #f0f6ff 0%, #e6f0ff 25%, #e9eef8 50%, #f8f9fa 100%);
 	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
 	color: #222;
-	-webkit-font-smoothing:antialiased;
-	-moz-osx-font-smoothing:grayscale;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
 	background-attachment: fixed;
 }
 
@@ -20,14 +24,21 @@ body {
 	position: relative;
 }
 
+/* Lista canchas */
 #canchas-list .list-group-item { 
-	display:flex; justify-content:space-between; align-items:center; 
-	padding: 14px 18px; border-radius:8px; margin-bottom:10px; 
+	display:flex; 
+	justify-content:space-between; 
+	align-items:center; 
+	padding: 14px 18px; 
+	border-radius:8px; 
+	margin-bottom:10px; 
 	border:1px solid #eef3fb; 
 	background: linear-gradient(180deg,#fff,#fbfdff); 
 }
+
 #canchas-list .list-group-item:hover { 
-	transform: translateY(-2px); transition: transform .12s ease; 
+	transform: translateY(-2px); 
+	transition: transform .12s ease; 
 	box-shadow: 0 6px 18px rgba(20,30,50,0.06); 
 }
 
@@ -35,24 +46,29 @@ body {
 /*                         MODAL                          */
 /* ===================================================== */
 
-/* Fondo translúcido suave */
+/* Fondo translúcido suave que ocupa TODA la pantalla */
 .modal-overlay { 
 	position: fixed;
 	inset: 0;
 	display: flex;
-	align-items: center;
-	justify-content: center;
+	align-items: center;          /* centrado vertical */
+	justify-content: center;      /* centrado horizontal */
 	z-index: 1050;
 	opacity: 0;
 	pointer-events: none;
 	transition: opacity 220ms ease;
-	background: rgba(255,255,255,0.35);   /* más transparente */
-}
-.modal-overlay:not(.d-none) { 
-	opacity: 1; pointer-events: auto;
+	background: rgba(0,0,0,0.28); /* fondo oscurecido suave */
+	padding: 24px 20px;
+	box-sizing: border-box;
+	overflow-y: auto;             /* scroll si el modal es muy alto */
 }
 
-/* Backdrop de bootstrap */
+.modal-overlay:not(.d-none) { 
+	opacity: 1; 
+	pointer-events: auto;
+		padding: 48px 20px 20px; /* larger top padding so modal never is hidden under browser chrome */
+
+/* Backdrop */
 .modal-backdrop {
 	position: fixed;
 	inset: 0;
@@ -68,39 +84,47 @@ body {
 		backdrop-filter: blur(6px) saturate(110%) brightness(0.98);
 	}
 }
-
-/* ===================== */
-/* Caja del modal mejorada */
-/* ===================== */
-
+		max-height: calc(100vh - 96px); /* ensure modal fits on small screens and scrolls internally if content is tall */
+/* Caja del modal */
 .modal-box { 
 	position: relative; 
 	background: #fff; 
 	border-radius: 14px; 
 	box-shadow: 0 22px 55px rgba(10,20,40,0.22); 
-	max-width: 1000px;     /* MÁS ANCHO */
-	width: calc(100% - 60px); 
-	margin: 1rem; 
+
+	/* ancho y alto adaptativos */
+	width: min(95vw, 920px);
+	max-height: 90vh;        /* SIEMPRE entra en la pantalla */
+	overflow-y: auto;        /* scroll interno cuando es necesario */
+
+	margin: 0 auto;
 	z-index: 1060; 
 	transform: translateY(6px) scale(.995); 
 	transition: transform 220ms ease; 
-	padding: 1.5rem;      /* más aire general */
+	padding: 1.5rem;         /* aire alrededor del formulario */
 }
+
 .modal-overlay:not(.d-none) .modal-box { 
 	transform: translateY(0) scale(1);
 }
 
-/* Header más grande */
+/* Header */
 .modal-header { 
 	padding: 26px 28px; 
 	border-bottom: 1px solid #eef3fb; 
-	display:flex; align-items:center; justify-content:space-between; 
-}
-.modal-header h3 { 
-	margin: 0; font-size: 1.8rem; font-weight:700; color:#111827;
+	display:flex; 
+	align-items:center; 
+	justify-content:space-between; 
 }
 
-/* Cuerpo amplio */
+.modal-header h3 { 
+	margin: 0; 
+	font-size: 1.8rem; 
+	font-weight:700; 
+	color:#111827;
+}
+
+/* Cuerpo */
 .modal-body { 
 	padding: 26px 28px;
 }
@@ -117,14 +141,48 @@ body {
 	min-height: 170px; 
 }
 
-/* Multiselect dropdown for servicios */
-.multiselect { position: relative; }
-.multiselect .btn { text-align: left; display: flex; justify-content: space-between; align-items: center; }
-.multiselect-menu { position: absolute; left: 0; right: 0; top: calc(100% + 8px); background: #fff; border: 1px solid #e6eef9; border-radius: 10px; box-shadow: 0 10px 30px rgba(20,30,50,0.08); max-height: 260px; overflow: auto; z-index: 2000; padding: 6px; }
-.multiselect-menu label { display: block; padding: 8px 10px; border-radius: 6px; cursor: pointer; color: #111827; }
-.multiselect-menu label:hover { background: #f4f8ff; }
-.multiselect-menu input[type="checkbox"] { margin-right: 8px; }
+/* Multiselect dropdown para servicios */
+.multiselect { 
+	position: relative; 
+}
 
+.multiselect .btn { 
+	text-align: left; 
+	display: flex; 
+	justify-content: space-between; 
+	align-items: center; 
+}
+
+.multiselect-menu { 
+	position: absolute; 
+	left: 0; 
+	right: 0; 
+	top: calc(100% + 8px); 
+	background: #fff; 
+	border: 1px solid #e6eef9; 
+	border-radius: 10px; 
+	box-shadow: 0 10px 30px rgba(20,30,50,0.08); 
+	max-height: 260px; 
+	overflow: auto; 
+	z-index: 2000; 
+	padding: 6px; 
+}
+
+.multiselect-menu label { 
+	display: block; 
+	padding: 8px 10px; 
+	border-radius: 6px; 
+	cursor: pointer; 
+	color: #111827; 
+}
+
+.multiselect-menu label:hover { 
+	background: #f4f8ff; 
+}
+
+.multiselect-menu input[type="checkbox"] { 
+	margin-right: 8px; 
+}
 
 /* Footer */
 .modal-footer {
@@ -133,30 +191,58 @@ body {
 	gap: 10px;
 }
 
-/* Botones */
+/* Botones en el modal */
 .modal-box .btn { 
 	padding: 12px 20px; 
 	font-weight:600; 
 }
 
-/* Close button */
+/* Botón de cerrar */
 .btn-close { 
 	background: #f1f5f9; 
 	border: none; 
-	width: 36px; height: 36px; 
+	width: 36px; 
+	height: 36px; 
 	border-radius: 50%; 
-	display:inline-flex; align-items:center; justify-content:center; 
+	display:inline-flex; 
+	align-items:center; 
+	justify-content:center; 
 	cursor:pointer; 
 }
+
 .btn-close:after { 
 	content: '✕'; 
-	font-size: 14px; color:#374151; 
+	font-size: 14px; 
+	color:#374151; 
 }
 
 /* Responsive */
 @media (max-width: 576px) {
-	#app-root { padding: 18px; margin-top: 14px; }
-	.modal-box { width: calc(100% - 24px); }
+	#app-root { 
+		padding: 18px; 
+		margin-top: 14px; 
+	}
+
+	.modal-box { 
+		width: calc(100% - 24px); 
+		padding: 1rem; 
+		max-height: 92vh;
+	}
+
+	.modal-header { 
+		padding: 12px 14px; 
+	}
+
+	.modal-body { 
+		padding: 12px 14px; 
+	}
+
+	.modal-header h3 { 
+		font-size: 1.25rem; 
+	}
 }
 
-.form-text { color: #6b7280; }
+.form-text { 
+	color: #6b7280; 
+}}
+

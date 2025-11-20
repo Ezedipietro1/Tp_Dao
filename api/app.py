@@ -165,6 +165,55 @@ def api_listar_clientes():
         return jsonify({'error': 'Error al obtener clientes', 'detail': str(e)}), 500
 
 
+@app.route('/clientes', methods=['POST'])
+def api_crear_cliente():
+    payload = request.get_json()
+    if not payload or 'dni' not in payload or 'nombre' not in payload:
+        return jsonify({'error': 'Body JSON requerido con campos: dni, nombre'}), 400
+    try:
+        repositorio.crear_cliente(payload)
+        return jsonify({'dni': payload.get('dni')}), 201
+    except Exception as e:
+        return jsonify({'error': 'Error al crear cliente', 'detail': str(e)}), 500
+
+
+@app.route('/clientes/<int:dni>', methods=['GET'])
+def api_get_cliente(dni):
+    try:
+        c = repositorio.get_cliente_por_dni(dni)
+        if not c:
+            return jsonify({'error': 'Cliente no encontrado'}), 404
+        return jsonify(c)
+    except Exception as e:
+        return jsonify({'error': 'Error al obtener cliente', 'detail': str(e)}), 500
+
+
+@app.route('/clientes/<int:dni>', methods=['PUT'])
+def api_actualizar_cliente(dni):
+    payload = request.get_json()
+    if not payload:
+        return jsonify({'error': 'Body JSON requerido'}), 400
+    # Do not allow changing DNI via this endpoint
+    if 'dni' in payload and str(payload.get('dni')) != str(dni):
+        return jsonify({'error': 'No está permitido cambiar el DNI de un cliente'}), 400
+    try:
+        repositorio.actualizar_cliente(dni, payload)
+        # return the updated cliente (try new dni if provided)
+        c = repositorio.get_cliente_por_dni(dni)
+        return jsonify({'dni': dni, 'status': 'updated', 'cliente': c})
+    except Exception as e:
+        return jsonify({'error': 'Error al actualizar cliente', 'detail': str(e)}), 500
+
+
+@app.route('/clientes/<int:dni>', methods=['DELETE'])
+def api_eliminar_cliente(dni):
+    try:
+        repositorio.eliminar_cliente(dni)
+        return jsonify({'dni': dni, 'status': 'deleted'})
+    except Exception as e:
+        return jsonify({'error': 'Error al eliminar cliente', 'detail': str(e)}), 500
+
+
 @app.route('/reservas', methods=['GET'])
 def api_listar_reservas():
     try:
@@ -263,6 +312,71 @@ def api_crear_reserva():
         return jsonify({'error': 'Error interno al crear la reserva', 'detail': str(e)}), 500
 
     return jsonify({'reserva_id': rid}), 201
+
+
+@app.route('/reservas/<int:reserva_id>', methods=['GET'])
+def api_get_reserva(reserva_id):
+    try:
+        r = repositorio.obtener_reserva(reserva_id)
+        if not r:
+            return jsonify({'error': 'Reserva no encontrada'}), 404
+        # convert Reserva object to dict similar to listar_reservas
+        def reserva_to_dict(r):
+            try:
+                fecha = r.get_fecha()
+                fecha_iso = fecha.isoformat() if fecha else getattr(r, 'fecha', None)
+            except Exception:
+                fecha_iso = getattr(r, 'fecha', None)
+
+            horarios = getattr(r, 'horarios', []) or []
+            horarios_out = []
+            for h in horarios:
+                try:
+                    if isinstance(h, dict):
+                        horarios_out.append({'id': h.get('id'), 'inicio': h.get('inicio'), 'fin': h.get('fin')})
+                    else:
+                        horarios_out.append({'id': h.get_id() if hasattr(h, 'get_id') else getattr(h, '_id', None), 'inicio': getattr(h, 'inicio', None) or getattr(h, '_inicio', None), 'fin': getattr(h, 'fin', None) or getattr(h, '_fin', None)})
+                except Exception:
+                    pass
+
+            return {
+                'id': r.get_id() if hasattr(r, 'get_id') else getattr(r, 'id', None),
+                'cancha_id': getattr(r, 'cancha', None) and (r.cancha._id if hasattr(r.cancha, '_id') else getattr(r.cancha, 'id', None)) or getattr(r, 'cancha_id', None),
+                'cancha_nombre': getattr(r, 'cancha_nombre', None),
+                'cliente_dni': getattr(r, 'cliente', None) and (r.cliente.get_dni() if hasattr(r.cliente, 'get_dni') else getattr(r.cliente, 'dni', None)) or getattr(r, 'cliente_dni', None),
+                'cliente_nombre': getattr(r, 'cliente_nombre', None),
+                'precio': r.get_precio_final() if hasattr(r, 'get_precio_final') else getattr(r, '_precio_final', None) or getattr(r, 'precio', None),
+                'fecha': fecha_iso,
+                'horarios': horarios_out,
+            }
+
+        return jsonify(reserva_to_dict(r))
+    except Exception as e:
+        return jsonify({'error': 'Error al obtener reserva', 'detail': str(e)}), 500
+
+
+@app.route('/reservas/<int:reserva_id>', methods=['PUT'])
+def api_actualizar_reserva(reserva_id):
+    payload = request.get_json()
+    if not payload:
+        return jsonify({'error': 'Body JSON requerido'}), 400
+    try:
+        repositorio.actualizar_reserva(reserva_id, payload)
+        updated = repositorio.obtener_reserva(reserva_id)
+        return jsonify({'reserva_id': reserva_id, 'status': 'updated', 'reserva': updated})
+    except ValueError as ve:
+        return jsonify({'error': str(ve)}), 400
+    except Exception as e:
+        return jsonify({'error': 'Error al actualizar reserva', 'detail': str(e)}), 500
+
+
+@app.route('/reservas/<int:reserva_id>', methods=['DELETE'])
+def api_eliminar_reserva(reserva_id):
+    try:
+        repositorio.cancelar_reserva(reserva_id)
+        return jsonify({'reserva_id': reserva_id, 'status': 'deleted'})
+    except Exception as e:
+        return jsonify({'error': 'Error al eliminar reserva', 'detail': str(e)}), 500
 
 
 @app.route('/reservas/<int:reserva_id>/cancel', methods=['POST'])

@@ -147,6 +147,50 @@ def cancelar_reserva(reserva_id: int) -> None:
     execute("DELETE FROM reserva WHERE id = ?", (reserva_id,))
 
 
+def obtener_reserva(reserva_id: int) -> Optional[Reserva]:
+    q = ("SELECT r.*, ch.id AS cancha_id, ch.precio_final AS precio_final, tc.nombre AS cancha_tipo, "
+         "cl.dni AS cliente_dni, cl.nombre AS cliente_nombre, cl.telefono AS cliente_telefono "
+         "FROM reserva r JOIN cancha ch ON r.cancha_id = ch.id LEFT JOIN tipo_cancha tc ON ch.tipo_cancha_id = tc.id JOIN cliente cl ON r.cliente_dni = cl.dni WHERE r.id = ?")
+    row = fetchone(q, (reserva_id,))
+    if not row:
+        return None
+    return _row_to_reserva(row)
+
+
+def actualizar_reserva(reserva_id: int, reserva: Dict[str, Any]) -> int:
+    # expected keys: cancha_id, cliente_dni, fecha, horario_ids (list), precio, torneo_id(optional)
+    cancha_id = reserva.get('cancha_id')
+    cliente_dni = reserva.get('cliente_dni')
+    fecha = reserva.get('fecha')
+    horario_ids = reserva.get('horario_ids') or reserva.get('horario_id')
+    precio = reserva.get('precio')
+    torneo_id = reserva.get('torneo_id') if 'torneo_id' in reserva else None
+
+    if not cancha_id or not cliente_dni or not fecha or not horario_ids or not precio:
+        raise ValueError('Faltan campos en la reserva. Se requieren: cancha_id, cliente_dni, fecha, horario_ids, precio')
+
+    if isinstance(horario_ids, int):
+        horario_ids = [horario_ids]
+
+    # verify availability excluding this reserva id
+    for hid in horario_ids:
+        q = "SELECT COUNT(1) AS cnt FROM reserva r JOIN reserva_x_horario rx ON r.id = rx.reserva_id WHERE r.cancha_id = ? AND r.fecha = ? AND rx.horario_id = ? AND r.id != ?"
+        row = fetchone(q, (cancha_id, fecha, hid, reserva_id))
+        if row and row.get('cnt', 0) > 0:
+            raise ValueError(f'Horario {hid} no disponible para la cancha {cancha_id} en la fecha {fecha}')
+
+    # update reserva row
+    q = "UPDATE reserva SET cancha_id = ?, cliente_dni = ?, precio_final = ?, fecha = ?, torneo_id = ? WHERE id = ?"
+    execute(q, (cancha_id, cliente_dni, precio, fecha, torneo_id, reserva_id))
+
+    # update horario links
+    execute("DELETE FROM reserva_x_horario WHERE reserva_id = ?", (reserva_id,))
+    for hid in horario_ids:
+        execute("INSERT INTO reserva_x_horario (reserva_id, horario_id) VALUES (?, ?)", (reserva_id, hid))
+
+    return reserva_id
+
+
 def listar_reservas(cancha_id: Optional[int] = None) -> List[Reserva]:
     base = ("SELECT r.*, ch.id AS cancha_id, ch.precio_final AS precio_final, tc.nombre AS cancha_tipo, "
             "cl.dni AS cliente_dni, cl.nombre AS cliente_nombre, cl.telefono AS cliente_telefono "
