@@ -698,12 +698,56 @@ function closeDeleteClienteModal() {
 async function confirmDeleteCliente() {
   if (!pendingDeleteClienteDni) return closeDeleteClienteModal();
   try {
-    await fetchJSON(`/clientes/${encodeURIComponent(pendingDeleteClienteDni)}`, { method: 'DELETE' });
+    // Use fetch directly so we can read error JSON and avoid relying on fetchJSON's thrown message
+    const url = API_BASE + `/clientes/${encodeURIComponent(pendingDeleteClienteDni)}`;
+    const res = await fetch(url, { method: 'DELETE' });
+    if (res.ok) {
+      closeDeleteClienteModal();
+      listarClientes();
+      showAlert('success', `Cliente ${pendingDeleteClienteDni} eliminado correctamente`);
+      return;
+    }
+    // try to read structured error from body
+    let bodyText = await res.text();
+    let userMsg = `HTTP ${res.status}`;
+    try {
+      const obj = JSON.parse(bodyText);
+      userMsg = obj.error || obj.detail || JSON.stringify(obj);
+    } catch (e) {
+      // if bodyText is plain text, use it
+      if (bodyText && bodyText.trim()) userMsg = bodyText.trim();
+    }
     closeDeleteClienteModal();
-    listarClientes();
+    showAlert('danger', `Error eliminando cliente: ${userMsg}`);
   } catch (err) {
     closeDeleteClienteModal();
-    alert('Error eliminando cliente: ' + err.message);
+    console.error('Error eliminando cliente (network):', err);
+    showAlert('danger', `Error eliminando cliente: ${err.message || String(err)}`);
+  }
+}
+
+// showAlert: type = 'success' | 'danger' | 'warning' | 'info'
+function showAlert(type, message, timeout = 6000) {
+  const container = document.getElementById('alert-container');
+  if (!container) {
+    // fallback to alert()
+    alert(message);
+    return;
+  }
+  const wrapper = document.createElement('div');
+  wrapper.className = `alert alert-${type} alert-dismissible fade show`;
+  wrapper.setAttribute('role', 'alert');
+  wrapper.innerHTML = `
+    <div>${message}</div>
+    <button type="button" class="btn-close" aria-label="Close"></button>
+  `;
+  const closeBtn = wrapper.querySelector('.btn-close');
+  closeBtn.addEventListener('click', () => { try { container.removeChild(wrapper); } catch (e) {} });
+  container.appendChild(wrapper);
+  if (timeout > 0) {
+    setTimeout(() => {
+      try { wrapper.classList.remove('show'); wrapper.classList.add('hide'); container.removeChild(wrapper); } catch (e) {}
+    }, timeout);
   }
 }
 

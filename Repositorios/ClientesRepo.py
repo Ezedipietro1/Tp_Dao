@@ -25,5 +25,10 @@ def actualizar_cliente(dni: str, cliente: Dict[str, Any]) -> int:
 
 
 def eliminar_cliente(dni: str) -> int:
+    # Prevent deletion if there are dependent reservas
+    q_check = "SELECT COUNT(1) as cnt FROM reserva WHERE cliente_dni = ?"
+    row = fetchone(q_check, (dni,))
+    if row and row.get('cnt', 0) > 0:
+        raise ValueError(f"No se puede eliminar cliente {dni}: existen reservas asociadas")
     q = "DELETE FROM cliente WHERE dni = ?"
     return execute(q, (dni,))

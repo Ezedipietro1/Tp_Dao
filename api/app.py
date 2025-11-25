@@ -210,6 +210,9 @@ def api_eliminar_cliente(dni):
     try:
         repositorio.eliminar_cliente(dni)
         return jsonify({'dni': dni, 'status': 'deleted'})
+    except ValueError as ve:
+        # domain-level validation (e.g., dependent reservas) -> return 400
+        return jsonify({'error': str(ve)}), 400
     except Exception as e:
         return jsonify({'error': 'Error al eliminar cliente', 'detail': str(e)}), 500
 
