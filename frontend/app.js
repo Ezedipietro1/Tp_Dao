@@ -7,6 +7,12 @@ let canchasCache = [];
 let recentReservations = [];
 // token to prevent concurrent listarHorarios renders from appending duplicated DOM
 let horarioRenderToken = 0;
+// set of horario ids that belong to the reserva being edited (so they remain selectable)
+let editingReservaHorarioIds = new Set();
+// the original cancha id of the reserva being edited (used to detect cancha changes)
+let editingReservaOriginalCanchaId = null;
+// the original fecha (YYYY-MM-DD) of the reserva being edited
+let editingReservaOriginalFecha = null;
 
 async function fetchJSON(path, opts) {
   const res = await fetch(API_BASE + path, opts);
@@ -330,6 +336,7 @@ async function listarHorarios(canchaId, fecha) {
   }
 
   horarioList.innerHTML = '<div class="text-muted">-- cargando horarios --</div>';
+  console.debug('[listarHorarios] start', { canchaId, fecha });
   try {
     const hs = await fetchJSON(`/horarios`);
     // horarios are global (no dia_semana). Show all and let the user select one or more via checkboxes.
@@ -347,20 +354,23 @@ async function listarHorarios(canchaId, fecha) {
     // load existing reservas for this cancha/date and build a map horario_id -> [reserva_ids]
     let reservedMap = new Map();
     try {
-      // add a timestamp to avoid stale cached responses
-      const reservas = await fetchJSON(`/reservas?cancha_id=${canchaId}&_ts=${Date.now()}`);
-      reservas.forEach(r => {
-        try {
-          if (r && r.fecha === fecha && Array.isArray(r.horarios)) {
-            r.horarios.forEach(hobj => {
-              const hid = Number(hobj.id);
-              if (!reservedMap.has(hid)) reservedMap.set(hid, []);
-              reservedMap.get(hid).push(r.id);
-            });
-          }
-        } catch (e) { /* ignore malformed reserva entries */ }
-      });
-      
+      if (!canchaId || isNaN(Number(canchaId))) {
+        console.debug('[listarHorarios] skipping reservas fetch: invalid canchaId', canchaId);
+      } else {
+        // add a timestamp to avoid stale cached responses
+        const reservas = await fetchJSON(`/reservas?cancha_id=${canchaId}&_ts=${Date.now()}`);
+        reservas.forEach(r => {
+          try {
+            if (r && r.fecha === fecha && Array.isArray(r.horarios)) {
+              r.horarios.forEach(hobj => {
+                const hid = Number(hobj.id);
+                if (!reservedMap.has(hid)) reservedMap.set(hid, []);
+                reservedMap.get(hid).push(r.id);
+              });
+            }
+          } catch (e) { /* ignore malformed reserva entries */ }
+        });
+      }
     } catch (e) {
       // if reservas endpoint fails, we continue but won't mark ocupados
       console.warn('No se pudieron cargar reservas para marcar horarios ocupados', e);
@@ -383,32 +393,58 @@ async function listarHorarios(canchaId, fecha) {
       console.warn('Error merging recentReservations (post-fetch)', mergeErr);
     }
 
+    // Debug: show editingReservaHorarioIds and reservedMap snapshot
+    try {
+      console.debug('[listarHorarios] editingReservaHorarioIds ->', Array.from(editingReservaHorarioIds || []));
+      const reservedSnapshot = {};
+      reservedMap.forEach((v, k) => { reservedSnapshot[k] = v.slice(); });
+      console.debug('[listarHorarios] reservedMap snapshot ->', reservedSnapshot);
+    } catch (dbgErr) { /* ignore debug errors */ }
+
     // if another listarHorarios was started after this one, abort rendering
     const myToken = ++horarioRenderToken;
+    console.debug('[listarHorarios] render token', myToken);
 
     hs.forEach(h => {
       const id = h.id;
+      // if an element with this horario id already exists in the DOM, update it instead of skipping
+      let existingItem = null;
+      try {
+        existingItem = horarioList.querySelector(`#horario-${id}`) ? horarioList.querySelector(`#horario-${id}`).closest('.form-check') : null;
+        if (existingItem) {
+          console.debug('[listarHorarios] updating existing horario element', id);
+        }
+      } catch (e) { existingItem = null; }
       const startM = parseToMinutes(h.inicio);
       const disabledByTime = fechaIsToday && (startM < nowMinutes);
 
-      const item = document.createElement('div');
+      const item = existingItem || document.createElement('div');
       item.className = 'form-check';
 
-      const cb = document.createElement('input');
-      cb.className = 'form-check-input';
-      cb.type = 'checkbox';
-      cb.id = `horario-${id}`;
+      // create or reuse checkbox
+      let cb = item.querySelector(`#horario-${id}`);
+      if (!cb) {
+        cb = document.createElement('input');
+        cb.className = 'form-check-input';
+        cb.type = 'checkbox';
+        cb.id = `horario-${id}`;
+        cb.addEventListener('change', computeAndShowPrice);
+        item.appendChild(cb);
+      }
       cb.value = JSON.stringify(h);
       cb.dataset.hid = id;
-      cb.addEventListener('change', computeAndShowPrice);
 
-      // determine if this horario is occupied by any reserva other than the one being edited
+      // determine if this horario is occupied by any reserva
       const occupiedBy = reservedMap.get(Number(id)) || [];
       let occupied = false;
       if (occupiedBy.length > 0) {
-        // if editing an existing reserva, allow its own horarios to remain selectable
-        if (typeof editingReservaId === 'number' && editingReservaId) {
-          // if all occupying reserva ids are the same as the editingReservaId, don't treat as occupied
+        // Allow editingReservaHorarioIds to make horarios selectable ONLY if
+        // the user is editing a reserva that originally belongs to the same cancha+fecha.
+        const editingReservaMatchesContext = (editingReservaOriginalCanchaId != null && Number(editingReservaOriginalCanchaId) === Number(canchaId) && editingReservaOriginalFecha && String(editingReservaOriginalFecha) === String(fecha));
+        if (editingReservaMatchesContext && editingReservaHorarioIds && editingReservaHorarioIds.has(Number(id))) {
+          occupied = false;
+        } else if (typeof editingReservaId === 'number' && editingReservaId) {
+          // otherwise, consider occupied only if there are other reservas (not the one being edited)
           const others = occupiedBy.filter(rid => Number(rid) !== Number(editingReservaId));
           occupied = others.length > 0;
         } else {
@@ -418,19 +454,26 @@ async function listarHorarios(canchaId, fecha) {
 
       if (disabledByTime || occupied) cb.disabled = true;
 
-      const label = document.createElement('label');
-      label.className = 'form-check-label';
-      label.htmlFor = cb.id;
+      let label = item.querySelector(`label[for='horario-${id}']`);
+      if (!label) {
+        label = document.createElement('label');
+        label.className = 'form-check-label';
+        label.htmlFor = cb.id;
+        item.appendChild(label);
+      }
       label.textContent = `${h.inicio}-${h.fin}` + (disabledByTime ? ' — NO DISPONIBLE' : (occupied ? ' — OCUPADO' : ''));
       if (occupied) {
         label.title = `Ocupado por reserva(s): ${reservedMap.get(Number(id)).join(', ')}`;
+      } else {
+        label.title = '';
       }
-
-      item.appendChild(cb);
-      item.appendChild(label);
       // ensure this render is still current
-      if (myToken !== horarioRenderToken) return;
-      horarioList.appendChild(item);
+      if (myToken !== horarioRenderToken) {
+        console.debug('[listarHorarios] aborting update/append for', id, 'token', myToken, 'current', horarioRenderToken);
+        return;
+      }
+      console.debug('[listarHorarios] append/update horario', id, 'token', myToken);
+      if (!existingItem) horarioList.appendChild(item);
     });
     // recompute precio if needed
     if (myToken === horarioRenderToken) computeAndShowPrice();
@@ -504,15 +547,26 @@ window.addEventListener('load', () => {
   document.getElementById('btn-canchas').addEventListener('click', () => { show('canchas-section'); listarCanchas(); });
   const btnCrearReserva = document.getElementById('btn-crear-reserva');
   if (btnCrearReserva) btnCrearReserva.addEventListener('click', () => {
+    console.debug('[UI] btn-crear-reserva clicked');
     // open reservation modal for creating a new reserva
-    document.getElementById('reserva-form-title').textContent = 'Crear reserva';
-    openReservaModal();
-    try { document.getElementById('reserva-form').reset(); } catch (e) {}
-    editingReservaId = null;
-    const horarioList = document.getElementById('horario-list');
-    if (horarioList) { horarioList.innerHTML = '<div class="text-muted">-- seleccionar fecha primero --</div>'; }
-    // load clients list into the select
-    try { populateClientesSelect(); } catch (e) { console.error('Error cargando clientes para crear reserva', e); }
+    try {
+      document.getElementById('reserva-form-title').textContent = 'Crear reserva';
+      openReservaModal();
+      const form = document.getElementById('reserva-form');
+      if (form) {
+        try { form.reset(); } catch (e) { console.warn('Could not reset reserva-form', e); }
+      }
+      editingReservaId = null;
+      try { editingReservaHorarioIds = new Set(); editingReservaOriginalCanchaId = null; } catch (e) {}
+      const horarioList = document.getElementById('horario-list');
+      if (horarioList) { horarioList.innerHTML = '<div class="text-muted">-- seleccionar fecha primero --</div>'; }
+      // load clients list into the select
+      try { populateClientesSelect(); } catch (e) { console.error('Error cargando clientes para crear reserva', e); }
+    } catch (err) {
+      console.error('[UI] error handling btn-crear-reserva click', err);
+      // ensure we don't accidentally navigate away; keep the reservas view visible
+      try { show('reservas-section'); } catch (e) {}
+    }
   });
   document.getElementById('btn-clientes').addEventListener('click', () => { show('clientes-section'); listarClientes(); });
   // canchas UI hooks
@@ -563,6 +617,26 @@ window.addEventListener('load', () => {
   document.querySelectorAll('.btn-back').forEach(b => b.addEventListener('click', () => show('main-menu')));
   // initial view: main menu
   show('main-menu');
+  // attach reserva form submit handler once
+  const reservaForm = document.getElementById('reserva-form');
+  if (reservaForm) reservaForm.addEventListener('submit', crearActualizarReserva);
+  // when cancha selection changes, if fecha is present reload horarios
+  const canchaSelectEl = document.getElementById('cancha-select');
+  if (canchaSelectEl) {
+    canchaSelectEl.addEventListener('change', (ev) => {
+      const newCancha = parseInt(ev.target.value, 10);
+      const fecha = document.getElementById('fecha-select').value;
+      console.debug('[UI] cancha-select changed', { newCancha, fecha, editingReservaId, editingReservaOriginalCanchaId });
+      // if we're editing a reserva and the cancha changed away from the original, clear horario ids
+      if (editingReservaId && editingReservaOriginalCanchaId != null && Number(newCancha) !== Number(editingReservaOriginalCanchaId)) {
+        console.debug('[UI] cancha changed during edit - clearing editingReservaHorarioIds and original identifiers');
+        try { editingReservaHorarioIds = new Set(); editingReservaOriginalCanchaId = null; editingReservaOriginalFecha = null; } catch (e) {}
+      }
+      if (newCancha && fecha) {
+        listarHorarios(newCancha, fecha);
+      }
+    });
+  }
   // Event delegation fallback for reservas list (handles Edit/Delete clicks reliably)
   const reservasList = document.getElementById('reservas-list');
   if (reservasList) {
@@ -865,21 +939,11 @@ async function listarReservas() {
       btnEdit.textContent = 'Editar';
       btnEdit.setAttribute('data-action', 'edit');
       btnEdit.setAttribute('data-id', r.id);
-      btnEdit.addEventListener('click', () => {
-        try {
-          console.log('[UI] Edit reserva clicked:', r.id);
-          showEditReserva(r.id);
-        } catch (e) {
-          console.error('Error invoking showEditReserva:', e);
-          alert('Error al intentar editar la reserva. Ver consola para más detalles.');
-        }
-      });
       const btnDelete = document.createElement('button');
       btnDelete.className = 'btn btn-sm btn-outline-danger';
       btnDelete.textContent = 'Eliminar';
       btnDelete.setAttribute('data-action', 'delete');
       btnDelete.setAttribute('data-id', r.id);
-      btnDelete.addEventListener('click', () => eliminarReserva(r.id));
       actions.appendChild(btnEdit);
       actions.appendChild(btnDelete);
       item.appendChild(left);
@@ -906,6 +970,16 @@ async function showEditReserva(reservaId) {
     if (canchaSel) canchaSel.value = r.cancha_id || '';
     // set fecha
     const fechaEl = document.getElementById('fecha-select'); if (fechaEl) fechaEl.value = r.fecha || '';
+    // mark that we're editing this reserva so listarHorarios can allow its own horarios
+    editingReservaId = reservaId;
+    try {
+      editingReservaHorarioIds = new Set((r.horarios || []).map(h => Number(h.id)));
+    } catch (e) {
+      editingReservaHorarioIds = new Set();
+    }
+    // remember original cancha and fecha for this reserva so we can detect changes
+    try { editingReservaOriginalCanchaId = r.cancha_id || null; } catch (e) { editingReservaOriginalCanchaId = null; }
+    try { editingReservaOriginalFecha = r && r.fecha ? String(r.fecha).slice(0,10) : null; } catch (e) { editingReservaOriginalFecha = null; }
     // load horarios and mark selected
     await listarHorarios(r.cancha_id, r.fecha);
     const horarioList = document.getElementById('horario-list');
@@ -926,10 +1000,13 @@ async function showEditReserva(reservaId) {
   } catch (err) {
     console.error('Error in showEditReserva:', err);
     alert('Error cargando reserva: ' + err.message + '\nVer consola para más detalles.');
+    // clear editing flag on error
+    try { editingReservaId = null; } catch (e) {}
   }
 }
 
 function openReservaModal() {
+  console.debug('[UI] openReservaModal');
   const modal = document.getElementById('reserva-modal');
   if (modal) modal.classList.remove('d-none');
 }
@@ -938,6 +1015,8 @@ function closeReservaModal() {
   const modal = document.getElementById('reserva-modal');
   if (modal) modal.classList.add('d-none');
   try { document.getElementById('reserva-form').reset(); } catch (e) {}
+  // clear editing reservation context
+  try { editingReservaId = null; editingReservaHorarioIds = new Set(); editingReservaOriginalCanchaId = null; } catch (e) {}
 }
 
 async function crearActualizarReserva(e) {
@@ -978,8 +1057,9 @@ async function crearActualizarReserva(e) {
         const newId = res.reserva_id || res.id;
         const hrs = horario_objs.map(h => ({ id: h.id, inicio: h.inicio, fin: h.fin }));
         if (newId) {
-          recentReservations.push({ id: newId, cancha_id: canchaId, fecha: fecha, horarios: hrs });
-        }
+            recentReservations.push({ id: newId, cancha_id: canchaId, fecha: fecha, horarios: hrs });
+          }
+        try { editingReservaHorarioIds = new Set(); } catch (e) {}
       } catch (e) { console.warn('Error adding recentReservations after POST', e); }
     }
     // close modal, reset form and refresh lists
@@ -1113,8 +1193,7 @@ function computeAndShowPrice() {
   }
 }
 
-const horarioListEl = document.getElementById('horario-list');
-if (horarioListEl) horarioListEl.addEventListener('change', computeAndShowPrice);
+// attach compute price listener once (attached earlier during window.load)
 
 // expose helpers to global scope for debugging and inline onclick usage
 try {
