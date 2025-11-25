@@ -116,6 +116,10 @@ def actualizar_cancha(cancha_id: int, data: Dict[str, Any]) -> int:
     """
     tipo_id = data.get('tipo_cancha_id')
     servicio_ids = data.get('servicio_ids')
+    # prevent updates if there are reservas for this cancha
+    reserva_count_row = fetchone("SELECT COUNT(1) AS cnt FROM reserva WHERE cancha_id = ?", (cancha_id,))
+    if reserva_count_row and reserva_count_row.get('cnt') and int(reserva_count_row.get('cnt')) > 0:
+        raise ValueError('No se puede modificar la cancha: existen reservas asociadas.')
     # if tipo not provided, read current
     if not tipo_id:
         row = fetchone("SELECT tipo_cancha_id FROM cancha WHERE id = ?", (cancha_id,))
@@ -145,23 +149,13 @@ def actualizar_cancha(cancha_id: int, data: Dict[str, Any]) -> int:
 
 def eliminar_cancha(cancha_id: int) -> None:
     """Eliminar cancha y sus relaciones con servicios."""
+    # Do not allow deletion if there are reservas for this cancha
+    reserva_count_row = fetchone("SELECT COUNT(1) AS cnt FROM reserva WHERE cancha_id = ?", (cancha_id,))
+    if reserva_count_row and reserva_count_row.get('cnt') and int(reserva_count_row.get('cnt')) > 0:
+        raise ValueError('No se puede eliminar la cancha: existen reservas asociadas.')
+
     # remove links to servicios
     execute("DELETE FROM cancha_x_servicio WHERE cancha_id = ?", (cancha_id,))
-
-    # find reservas asociadas a esta cancha
-    reserva_rows = fetchall("SELECT id FROM reserva WHERE cancha_id = ?", (cancha_id,))
-    reserva_ids = [r.get('id') for r in reserva_rows] if reserva_rows else []
-
-    if reserva_ids:
-        # delete pagos asociados a esas reservas (pago.reserva_id -> reserva.id)
-        placeholders = ','.join('?' for _ in reserva_ids)
-        execute(f"DELETE FROM pago WHERE reserva_id IN ({placeholders})", tuple(reserva_ids))
-
-        # delete reserva_x_horario entries for esas reservas
-        execute(f"DELETE FROM reserva_x_horario WHERE reserva_id IN ({placeholders})", tuple(reserva_ids))
-
-        # finally delete las reservas
-        execute(f"DELETE FROM reserva WHERE id IN ({placeholders})", tuple(reserva_ids))
 
     # delete the cancha
     execute("DELETE FROM cancha WHERE id = ?", (cancha_id,))
@@ -195,3 +189,12 @@ def listar_servicios() -> List[Dict[str, Any]]:
 def listar_tipos() -> List[Dict[str, Any]]:
     q = "SELECT id, nombre, precio FROM tipo_cancha ORDER BY id"
     return fetchall(q)
+
+
+def contar_reservas(cancha_id: int) -> int:
+    """Retorna la cantidad de reservas asociadas a una cancha (0 si no hay)."""
+    row = fetchone("SELECT COUNT(1) AS cnt FROM reserva WHERE cancha_id = ?", (cancha_id,))
+    try:
+        return int(row.get('cnt')) if row and row.get('cnt') is not None else 0
+    except Exception:
+        return 0

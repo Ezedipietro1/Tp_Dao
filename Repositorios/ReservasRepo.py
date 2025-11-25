@@ -143,6 +143,10 @@ def crear_reserva(reserva: Dict[str, Any]) -> int:
 
 
 def cancelar_reserva(reserva_id: int) -> None:
+    # Prevent deleting a reserva that has pagos associated (FK in pago.reserva_id)
+    row = fetchone("SELECT COUNT(1) as cnt FROM pago WHERE reserva_id = ?", (reserva_id,))
+    if row and row.get('cnt', 0) > 0:
+        raise ValueError(f"No se puede eliminar reserva {reserva_id}: existen pagos asociados")
     execute("DELETE FROM reserva_x_horario WHERE reserva_id = ?", (reserva_id,))
     execute("DELETE FROM reserva WHERE id = ?", (reserva_id,))
 

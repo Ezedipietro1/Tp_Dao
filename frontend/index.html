@@ -61,15 +61,18 @@
         <form id="cliente-form">
           <div class="mb-2">
             <label class="form-label">DNI</label>
-            <input id="cliente-dni" type="number" class="form-control" required>
+            <input id="cliente-dni" type="text" inputmode="numeric" pattern="\d{7,8}" maxlength="8" class="form-control" required aria-describedby="cliente-dni-help">
+            <div id="cliente-dni-help" class="form-text">DNI: 7 u 8 dígitos (solo números).</div>
           </div>
           <div class="mb-2">
             <label class="form-label">Nombre</label>
-            <input id="cliente-nombre" type="text" class="form-control" required>
+            <input id="cliente-nombre" type="text" pattern="[A-Za-zÀ-ÿ\s]+" class="form-control" required aria-describedby="cliente-nombre-help">
+            <div id="cliente-nombre-help" class="form-text">Nombre: solo letras y espacios.</div>
           </div>
           <div class="mb-2">
             <label class="form-label">Teléfono</label>
-            <input id="cliente-telefono" type="text" class="form-control">
+            <input id="cliente-telefono" type="text" inputmode="tel" pattern="\d*" class="form-control" aria-describedby="cliente-telefono-help">
+            <div id="cliente-telefono-help" class="form-text">Teléfono: opcional, solo dígitos.</div>
           </div>
           <div class="d-flex gap-2">
             <button id="cliente-save" class="btn btn-primary" type="submit">Guardar</button>
@@ -144,11 +147,11 @@
             <input id="fecha-select" type="date" class="form-control">
           </div>
           <div class="mb-3">
-            <label for="horario-select" class="form-label">Horario disponible</label>
-            <select id="horario-select" class="form-select">
-              <option value="">-- seleccionar horario --</option>
-            </select>
-            <div class="form-text">Seleccioná una fecha arriba y luego un horario para autocompletar inicio/fin.</div>
+            <label class="form-label">Horarios disponibles</label>
+            <div id="horario-list" class="list-group">
+              <div class="form-text text-muted">-- seleccionar fecha primero --</div>
+            </div>
+            <div class="form-text">Seleccioná una fecha arriba y luego marcá uno o más horarios para autocompletar inicio/fin.</div>
           </div>
           <div class="mb-3">
             <label class="form-label">Cliente</label>
@@ -229,6 +232,6 @@
 
   </div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=2"></script>
 </body>
 </html>

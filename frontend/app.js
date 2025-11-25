@@ -1,5 +1,12 @@
 const API_BASE = 'http://127.0.0.1:5000';
+console.log('app.js loaded (v2)');
 let canchasCache = [];
+// Recent reservations created/updated in this client session (to avoid race conditions
+// when a second reservation is created immediately after the first and server
+// responses have not been refetched yet).
+let recentReservations = [];
+// token to prevent concurrent listarHorarios renders from appending duplicated DOM
+let horarioRenderToken = 0;
 
 async function fetchJSON(path, opts) {
   const res = await fetch(API_BASE + path, opts);
@@ -32,11 +39,22 @@ async function listarCanchas() {
       const btnEdit = document.createElement('button');
       btnEdit.className = 'btn btn-sm btn-outline-primary';
       btnEdit.textContent = 'Editar';
-      btnEdit.addEventListener('click', () => showEditCancha(cid));
+      // if cancha has reservas, do not allow editing
+      if (c.has_reservas) {
+        btnEdit.disabled = true;
+        btnEdit.title = 'No se puede editar: existen reservas asociadas';
+      } else {
+        btnEdit.addEventListener('click', () => showEditCancha(cid));
+      }
       const btnDelete = document.createElement('button');
       btnDelete.className = 'btn btn-sm btn-outline-danger';
       btnDelete.textContent = 'Eliminar';
-      btnDelete.addEventListener('click', () => eliminarCancha(cid));
+      if (c.has_reservas) {
+        btnDelete.disabled = true;
+        btnDelete.title = 'No se puede eliminar: existen reservas asociadas';
+      } else {
+        btnDelete.addEventListener('click', () => eliminarCancha(cid));
+      }
       actions.appendChild(btnEdit);
       actions.appendChild(btnDelete);
       item.appendChild(left);
@@ -293,11 +311,11 @@ async function aplicarFiltroCanchas() {
  * The horario select is disabled until a valid fecha >= today is selected.
  */
 async function listarHorarios(canchaId, fecha) {
-  const horarioSelect = document.getElementById('horario-select');
+  const horarioList = document.getElementById('horario-list');
   // require fecha
+  if (!horarioList) return;
   if (!fecha) {
-    horarioSelect.innerHTML = '<option value="">-- seleccionar fecha primero --</option>';
-    horarioSelect.disabled = true;
+    horarioList.innerHTML = '<div class="text-muted">-- seleccionar fecha primero --</div>';
     computeAndShowPrice();
     return;
   }
@@ -306,22 +324,16 @@ async function listarHorarios(canchaId, fecha) {
   const today = new Date();
   const selDate = new Date(fecha + 'T00:00:00');
   if (selDate.setHours(0,0,0,0) < new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) {
-    horarioSelect.innerHTML = '<option value="">Fecha inválida (anterior al día actual)</option>';
-    horarioSelect.disabled = true;
+    horarioList.innerHTML = '<div class="text-danger">Fecha inválida (anterior al día actual)</div>';
     computeAndShowPrice();
     return;
   }
 
-  horarioSelect.innerHTML = '<option value="">-- cargando horarios --</option>';
-  horarioSelect.disabled = false;
+  horarioList.innerHTML = '<div class="text-muted">-- cargando horarios --</div>';
   try {
-  const hs = await fetchJSON(`/horarios`);
-    // horarios are global (no dia_semana). Show all and let the user select one or more.
-    horarioSelect.innerHTML = '';
-    // make the select allow multiple choices for multi-slot reservations
-    horarioSelect.multiple = true;
-    horarioSelect.size = Math.min(8, hs.length || 8);
-    horarioSelect.innerHTML = '<option value="" disabled>-- seleccionar uno o más horarios (Ctrl/Cmd+click) --</option>';
+    const hs = await fetchJSON(`/horarios`);
+    // horarios are global (no dia_semana). Show all and let the user select one or more via checkboxes.
+    horarioList.innerHTML = '';
     // determine if fecha is today to disable past slots
     const todayStr = new Date().toISOString().slice(0,10);
     const fechaIsToday = (fecha === todayStr);
@@ -332,45 +344,103 @@ async function listarHorarios(canchaId, fecha) {
     const now = new Date();
     const nowMinutes = now.getHours()*60 + now.getMinutes();
 
+    // load existing reservas for this cancha/date and build a map horario_id -> [reserva_ids]
+    let reservedMap = new Map();
+    try {
+      // add a timestamp to avoid stale cached responses
+      const reservas = await fetchJSON(`/reservas?cancha_id=${canchaId}&_ts=${Date.now()}`);
+      reservas.forEach(r => {
+        try {
+          if (r && r.fecha === fecha && Array.isArray(r.horarios)) {
+            r.horarios.forEach(hobj => {
+              const hid = Number(hobj.id);
+              if (!reservedMap.has(hid)) reservedMap.set(hid, []);
+              reservedMap.get(hid).push(r.id);
+            });
+          }
+        } catch (e) { /* ignore malformed reserva entries */ }
+      });
+      
+    } catch (e) {
+      // if reservas endpoint fails, we continue but won't mark ocupados
+      console.warn('No se pudieron cargar reservas para marcar horarios ocupados', e);
+    }
+
+    // always merge recentReservations (even if the GET failed or returned empty)
+    try {
+      recentReservations.forEach(r => {
+        if (r && Number(r.cancha_id) === Number(canchaId) && String(r.fecha) === String(fecha)) {
+          if (Array.isArray(r.horarios)) {
+            r.horarios.forEach(hobj => {
+              const hid = Number(hobj.id);
+              if (!reservedMap.has(hid)) reservedMap.set(hid, []);
+              reservedMap.get(hid).push(r.id);
+            });
+          }
+        }
+      });
+    } catch (mergeErr) {
+      console.warn('Error merging recentReservations (post-fetch)', mergeErr);
+    }
+
+    // if another listarHorarios was started after this one, abort rendering
+    const myToken = ++horarioRenderToken;
+
     hs.forEach(h => {
-      const opt = document.createElement('option');
-      opt.value = JSON.stringify(h);
-      let label = `${h.inicio}-${h.fin}`;
-      // if fecha is today, disable slots that start earlier than current time
-      if (fechaIsToday) {
-        const startM = parseToMinutes(h.inicio);
-        if (startM < nowMinutes) {
-          opt.disabled = true;
-          label += ' — NO DISPONIBLE';
-          opt.title = 'Horario en el pasado (no disponible)';
+      const id = h.id;
+      const startM = parseToMinutes(h.inicio);
+      const disabledByTime = fechaIsToday && (startM < nowMinutes);
+
+      const item = document.createElement('div');
+      item.className = 'form-check';
+
+      const cb = document.createElement('input');
+      cb.className = 'form-check-input';
+      cb.type = 'checkbox';
+      cb.id = `horario-${id}`;
+      cb.value = JSON.stringify(h);
+      cb.dataset.hid = id;
+      cb.addEventListener('change', computeAndShowPrice);
+
+      // determine if this horario is occupied by any reserva other than the one being edited
+      const occupiedBy = reservedMap.get(Number(id)) || [];
+      let occupied = false;
+      if (occupiedBy.length > 0) {
+        // if editing an existing reserva, allow its own horarios to remain selectable
+        if (typeof editingReservaId === 'number' && editingReservaId) {
+          // if all occupying reserva ids are the same as the editingReservaId, don't treat as occupied
+          const others = occupiedBy.filter(rid => Number(rid) !== Number(editingReservaId));
+          occupied = others.length > 0;
+        } else {
+          occupied = true;
         }
       }
-      opt.textContent = label;
-      horarioSelect.appendChild(opt);
+
+      if (disabledByTime || occupied) cb.disabled = true;
+
+      const label = document.createElement('label');
+      label.className = 'form-check-label';
+      label.htmlFor = cb.id;
+      label.textContent = `${h.inicio}-${h.fin}` + (disabledByTime ? ' — NO DISPONIBLE' : (occupied ? ' — OCUPADO' : ''));
+      if (occupied) {
+        label.title = `Ocupado por reserva(s): ${reservedMap.get(Number(id)).join(', ')}`;
+      }
+
+      item.appendChild(cb);
+      item.appendChild(label);
+      // ensure this render is still current
+      if (myToken !== horarioRenderToken) return;
+      horarioList.appendChild(item);
     });
     // recompute precio if needed
-    computeAndShowPrice();
+    if (myToken === horarioRenderToken) computeAndShowPrice();
   } catch (err) {
-    horarioSelect.innerHTML = `<option value="">Error: ${err.message}</option>`;
-    horarioSelect.disabled = true;
+    horarioList.innerHTML = `<div class="text-danger">Error: ${err.message}</div>`;
   }
-}
-
 // NOTE: manual datetime inputs were removed; reservas must be created via fecha + horario
-// The form submit is handled by crearActualizarReserva (supports create and edit).
-document.getElementById('reserva-form').addEventListener('submit', crearActualizarReserva);
-document.getElementById('cancha-select').addEventListener('change', (e) => {
-  const v = parseInt(e.target.value, 10);
-  const fecha = document.getElementById('fecha-select').value;
-  if (v && fecha) listarHorarios(v, fecha);
-  else {
-    // require date first
-    const horarioSelect = document.getElementById('horario-select');
-    horarioSelect.innerHTML = '<option value="">-- seleccionar fecha primero --</option>';
-    horarioSelect.disabled = true;
-    document.getElementById('precio').value = '';
-  }
-});
+// The form submit and cancha-select change listeners are attached once during initialization.
+
+}
 
 // when fecha changes, validate and (if cancha selected) reload horarios
 document.getElementById('fecha-select').addEventListener('change', (e) => {
@@ -382,9 +452,8 @@ document.getElementById('fecha-select').addEventListener('change', (e) => {
   if (canchaId && fecha) {
     listarHorarios(canchaId, fecha);
   } else {
-    const horarioSelect = document.getElementById('horario-select');
-    horarioSelect.innerHTML = '<option value="">-- seleccionar fecha primero --</option>';
-    horarioSelect.disabled = true;
+    const horarioList = document.getElementById('horario-list');
+    if (horarioList) horarioList.innerHTML = '<div class="text-muted">-- seleccionar fecha primero --</div>';
   }
 });
 
@@ -395,11 +464,12 @@ window.addEventListener('load', () => {
   const fechaEl = document.getElementById('fecha-select');
   if (fechaEl) fechaEl.setAttribute('min', todayStr);
   // disable horario until user picks a date
-  const horarioSelect = document.getElementById('horario-select');
-  if (horarioSelect) {
-    horarioSelect.innerHTML = '<option value="">-- seleccionar fecha primero --</option>';
-    horarioSelect.disabled = true;
+  const horarioList = document.getElementById('horario-list');
+  if (horarioList) {
+    horarioList.innerHTML = '<div class="text-muted">-- seleccionar fecha primero --</div>';
   }
+  const horarioListEl = document.getElementById('horario-list');
+  if (horarioListEl) horarioListEl.addEventListener('change', computeAndShowPrice);
   // delete-confirm modal handlers
   const delConfirm = document.getElementById('delete-cancha-confirm');
   const delCancel = document.getElementById('delete-cancha-cancel');
@@ -439,8 +509,8 @@ window.addEventListener('load', () => {
     openReservaModal();
     try { document.getElementById('reserva-form').reset(); } catch (e) {}
     editingReservaId = null;
-    const horarioSelect = document.getElementById('horario-select');
-    if (horarioSelect) { horarioSelect.innerHTML = '<option value="">-- seleccionar horario --</option>'; horarioSelect.disabled = true; }
+    const horarioList = document.getElementById('horario-list');
+    if (horarioList) { horarioList.innerHTML = '<div class="text-muted">-- seleccionar fecha primero --</div>'; }
     // load clients list into the select
     try { populateClientesSelect(); } catch (e) { console.error('Error cargando clientes para crear reserva', e); }
   });
@@ -655,6 +725,25 @@ async function crearActualizarCliente(e) {
     alert('DNI y Nombre son requeridos');
     return;
   }
+  // Frontend validation: dni 7-8 digits, nombre only letters/spaces, telefono digits only (if provided)
+  const dniDigits = /^[0-9]{7,8}$/;
+  const nombreRe = /^[A-Za-zÀ-ÿ\s]+$/;
+  const telefonoRe = /^\d*$/;
+  if (!dniDigits.test(dni)) {
+    showAlert('danger', 'DNI inválido: debe contener sólo 7 u 8 dígitos.');
+    if (dniEl) dniEl.focus();
+    return;
+  }
+  if (!nombreRe.test(nombre)) {
+    showAlert('danger', 'Nombre inválido: solo se permiten letras y espacios.');
+    if (nombreEl) nombreEl.focus();
+    return;
+  }
+  if (telefono && !telefonoRe.test(telefono)) {
+    showAlert('danger', 'Teléfono inválido: solo se permiten dígitos.');
+    if (telefonoEl) telefonoEl.focus();
+    return;
+  }
   const payload = { nombre, telefono };
   try {
     if (editingClienteDni) {
@@ -663,6 +752,7 @@ async function crearActualizarCliente(e) {
       const res = await fetchJSON(`/clientes/${encodeURIComponent(editingClienteDni)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       console.log('[CLIENTES] PUT response ->', res);
     } else {
+      // ensure we send dni as number when creating
       payload.dni = Number(dni);
       console.log('[CLIENTES] POST payload ->', payload, 'url ->', '/clientes');
       const res = await fetchJSON('/clientes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -702,9 +792,13 @@ async function confirmDeleteCliente() {
     const url = API_BASE + `/clientes/${encodeURIComponent(pendingDeleteClienteDni)}`;
     const res = await fetch(url, { method: 'DELETE' });
     if (res.ok) {
+      // prefer server-provided id in response body
+      let respJson = {};
+      try { respJson = await res.json(); } catch (e) {}
+      const deletedId = respJson.dni || respJson.cliente_dni || pendingDeleteClienteDni;
       closeDeleteClienteModal();
       listarClientes();
-      showAlert('success', `Cliente ${pendingDeleteClienteDni} eliminado correctamente`);
+      showAlert('success', `Cliente ${deletedId} eliminado correctamente`);
       return;
     }
     // try to read structured error from body
@@ -814,13 +908,13 @@ async function showEditReserva(reservaId) {
     const fechaEl = document.getElementById('fecha-select'); if (fechaEl) fechaEl.value = r.fecha || '';
     // load horarios and mark selected
     await listarHorarios(r.cancha_id, r.fecha);
-    const horarioSelect = document.getElementById('horario-select');
-    if (horarioSelect && Array.isArray(r.horarios)) {
-      // mark options whose JSON value id matches
-      Array.from(horarioSelect.options).forEach(opt => {
+    const horarioList = document.getElementById('horario-list');
+    if (horarioList && Array.isArray(r.horarios)) {
+      const selectedIds = new Set(r.horarios.map(h => Number(h.id)));
+      horarioList.querySelectorAll('input[type=checkbox]').forEach(cb => {
         try {
-          const obj = JSON.parse(opt.value);
-          opt.selected = r.horarios.some(h => Number(h.id) === Number(obj.id));
+          const obj = JSON.parse(cb.value);
+          cb.checked = selectedIds.has(Number(obj.id));
         } catch (e) {}
       });
     }
@@ -852,9 +946,9 @@ async function crearActualizarReserva(e) {
   const clienteSelect = document.getElementById('reserva-cliente-select');
   const clienteDni = clienteSelect ? String(clienteSelect.value).trim() : '';
   const fecha = document.getElementById('fecha-select').value;
-  const horarioSelectEl = document.getElementById('horario-select');
-  const selectedOptions = Array.from(horarioSelectEl.selectedOptions).filter(o => o.value && !o.disabled);
-  const horario_objs = selectedOptions.map(o => JSON.parse(o.value));
+  const horarioContainer = document.getElementById('horario-list');
+  const checkedBoxes = horarioContainer ? Array.from(horarioContainer.querySelectorAll('input[type=checkbox]:checked')).filter(cb => !cb.disabled) : [];
+  const horario_objs = checkedBoxes.map(cb => JSON.parse(cb.value));
   const horario_ids = horario_objs.map(h => h.id);
   const precio = parseFloat(document.getElementById('precio').value);
   if (!canchaId || !clienteDni || !fecha || horario_ids.length === 0 || isNaN(precio)) {
@@ -867,16 +961,31 @@ async function crearActualizarReserva(e) {
       console.log('[RESERVAS] PUT payload ->', payload, 'url ->', `/reservas/${editingReservaId}`);
       const res = await fetchJSON(`/reservas/${editingReservaId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       console.log('[RESERVAS] PUT response ->', res);
+      // update recentReservations: remove any previous entry with this id and add the updated one
+      try {
+        recentReservations = recentReservations.filter(r => Number(r.id) !== Number(editingReservaId));
+        const updated = res.reserva ? res.reserva : { id: editingReservaId, cancha_id: canchaId, fecha: fecha, horarios: horario_objs };
+        // normalize horarios
+        const hrs = Array.isArray(updated.horarios) ? updated.horarios.map(h => (h && h.id ? { id: h.id, inicio: h.inicio, fin: h.fin } : h)) : horario_objs.map(h => ({ id: h.id, inicio: h.inicio, fin: h.fin }));
+        recentReservations.push({ id: updated.id || editingReservaId, cancha_id: canchaId, fecha: fecha, horarios: hrs });
+      } catch (e) { console.warn('Error updating recentReservations after PUT', e); }
       editingReservaId = null;
     } else {
       console.log('[RESERVAS] POST payload ->', payload);
       const res = await fetchJSON('/reservas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       console.log('[RESERVAS] POST response ->', res);
+      try {
+        const newId = res.reserva_id || res.id;
+        const hrs = horario_objs.map(h => ({ id: h.id, inicio: h.inicio, fin: h.fin }));
+        if (newId) {
+          recentReservations.push({ id: newId, cancha_id: canchaId, fecha: fecha, horarios: hrs });
+        }
+      } catch (e) { console.warn('Error adding recentReservations after POST', e); }
     }
     // close modal, reset form and refresh lists
     closeReservaModal();
     document.getElementById('reserva-form').reset();
-    const horarioSelect = document.getElementById('horario-select'); if (horarioSelect) { horarioSelect.innerHTML = '<option value="">-- seleccionar horario --</option>'; horarioSelect.disabled = true; }
+    const horarioListAfter = document.getElementById('horario-list'); if (horarioListAfter) horarioListAfter.innerHTML = '<div class="text-muted">-- seleccionar fecha primero --</div>';
     try { await populateClientesSelect(); } catch (e) { /* ignore */ }
     listarReservas();
     listarCanchas();
@@ -928,12 +1037,33 @@ function closeDeleteReservaModal() {
 async function confirmDeleteReserva() {
   if (!pendingDeleteReservaId) return closeDeleteReservaModal();
   try {
-    await fetchJSON(`/reservas/${pendingDeleteReservaId}`, { method: 'DELETE' });
+    const url = API_BASE + `/reservas/${pendingDeleteReservaId}`;
+    const res = await fetch(url, { method: 'DELETE' });
+    if (res.ok) {
+      let respJson = {};
+      try { respJson = await res.json(); } catch (e) {}
+      const deletedId = respJson.reserva_id || respJson.id || pendingDeleteReservaId;
+      // remove any in-memory recent reservation matching this id
+      try { recentReservations = recentReservations.filter(r => Number(r.id) !== Number(deletedId)); } catch (e) { /* ignore */ }
+      closeDeleteReservaModal();
+      listarReservas();
+      showAlert('success', `Reserva ${deletedId} eliminada correctamente`);
+      return;
+    }
+    let bodyText = await res.text();
+    let userMsg = `HTTP ${res.status}`;
+    try {
+      const obj = JSON.parse(bodyText);
+      userMsg = obj.error || obj.detail || JSON.stringify(obj);
+    } catch (e) {
+      if (bodyText && bodyText.trim()) userMsg = bodyText.trim();
+    }
     closeDeleteReservaModal();
-    listarReservas();
+    showAlert('danger', `Error eliminando reserva: ${userMsg}`);
   } catch (err) {
     closeDeleteReservaModal();
-    alert('Error eliminando reserva: ' + err.message);
+    console.error('Error eliminando reserva (network):', err);
+    showAlert('danger', `Error eliminando reserva: ${err.message || String(err)}`);
   }
 }
 
@@ -946,14 +1076,14 @@ if (reservaCancelBtn) reservaCancelBtn.addEventListener('click', () => closeRese
 function computeAndShowPrice() {
   try {
     const canchaId = parseInt(document.getElementById('cancha-select').value, 10);
-    const horarioSelect = document.getElementById('horario-select');
+    const horarioList = document.getElementById('horario-list');
     const precioEl = document.getElementById('precio');
-    if (!canchaId || !horarioSelect) {
+    if (!canchaId || !horarioList) {
       if (precioEl) precioEl.value = '';
       return;
     }
-    const selectedOptions = Array.from(horarioSelect.selectedOptions).filter(o => o.value && !o.disabled);
-    if (selectedOptions.length === 0) {
+    const checkedBoxes = Array.from(horarioList.querySelectorAll('input[type=checkbox]:checked')).filter(cb => !cb.disabled);
+    if (checkedBoxes.length === 0) {
       if (precioEl) precioEl.value = '';
       return;
     }
@@ -964,16 +1094,16 @@ function computeAndShowPrice() {
       return parts[0]*60 + (parts[1]||0);
     }
     let totalHours = 0;
-    selectedOptions.forEach(opt => {
+    checkedBoxes.forEach(cb => {
       try {
-        const h = JSON.parse(opt.value);
+        const h = JSON.parse(cb.value);
         const startM = parseToMinutes(h.inicio);
         const endM = parseToMinutes(h.fin);
         let diff = endM - startM;
         if (diff <= 0) diff += 24*60;
         totalHours += diff/60;
       } catch (e) {
-        // ignore malformed option
+        // ignore malformed value
       }
     });
     const total = Math.round((totalHours * precioHora + Number.EPSILON) * 100) / 100;
@@ -983,7 +1113,8 @@ function computeAndShowPrice() {
   }
 }
 
-document.getElementById('horario-select').addEventListener('change', computeAndShowPrice);
+const horarioListEl = document.getElementById('horario-list');
+if (horarioListEl) horarioListEl.addEventListener('change', computeAndShowPrice);
 
 // expose helpers to global scope for debugging and inline onclick usage
 try {

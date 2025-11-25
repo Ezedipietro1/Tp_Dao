@@ -1,4 +1,5 @@
 from flask import Flask, jsonify, request
+import re
 try:
     from flask_cors import CORS
 except Exception:
@@ -30,6 +31,12 @@ def api_listar_canchas():
             try:
                 # if it's already a dict
                 if isinstance(c, dict):
+                    # try to augment with reserva count if id present
+                    try:
+                        cid = c.get('id')
+                        c['has_reservas'] = bool(repositorio.contar_reservas(cid)) if cid is not None else False
+                    except Exception:
+                        pass
                     return c
                 # try common accessor methods
                 return {
@@ -38,6 +45,7 @@ def api_listar_canchas():
                     'precio_por_hora': c.get_precio() if hasattr(c, 'get_precio') else getattr(c, 'precio_por_hora', None),
                     'tipo_cancha_id': c.get_tipo_id() if hasattr(c, 'get_tipo_id') else getattr(c, 'tipo_cancha_id', None),
                     'estado_id': c.get_estado_id() if hasattr(c, 'get_estado_id') else getattr(c, 'estado_id', None),
+                    'has_reservas': bool(repositorio.contar_reservas(c.get_id() if hasattr(c, 'get_id') else getattr(c, 'id', None)))
                 }
             except Exception:
                 return {}
@@ -71,6 +79,9 @@ def api_actualizar_cancha(cancha_id):
     try:
         repositorio.actualizar_cancha(cancha_id, payload)
         return jsonify({'cancha_id': cancha_id, 'status': 'updated'})
+    except ValueError as ve:
+        # domain-level validation (e.g., cannot update if there are reservas)
+        return jsonify({'error': str(ve)}), 400
     except Exception as e:
         return jsonify({'error': 'Error al actualizar cancha', 'detail': str(e)}), 500
 
@@ -80,6 +91,8 @@ def api_eliminar_cancha(cancha_id):
     try:
         repositorio.eliminar_cancha(cancha_id)
         return jsonify({'cancha_id': cancha_id, 'status': 'deleted'})
+    except ValueError as ve:
+        return jsonify({'error': str(ve)}), 400
     except Exception as e:
         return jsonify({'error': 'Error al eliminar cancha', 'detail': str(e)}), 500
 
@@ -170,6 +183,20 @@ def api_crear_cliente():
     payload = request.get_json()
     if not payload or 'dni' not in payload or 'nombre' not in payload:
         return jsonify({'error': 'Body JSON requerido con campos: dni, nombre'}), 400
+    # validate fields
+    dni_val = str(payload.get('dni'))
+    nombre_val = str(payload.get('nombre'))
+    telefono_val = payload.get('telefono')
+    # DNI must be digits only and 7-8 length
+    if not dni_val.isdigit() or len(dni_val) not in (7, 8):
+        return jsonify({'error': 'DNI inválido. Debe ser un número de 7 u 8 dígitos.'}), 400
+    # nombre must contain only letters and spaces (allow accents)
+    if not re.match(r"^[A-Za-zÀ-ÿ\s]+$", nombre_val):
+        return jsonify({'error': 'Nombre inválido. Solo se permiten letras y espacios.'}), 400
+    # telefono, if provided, must be digits only
+    if telefono_val is not None and str(telefono_val).strip() != '':
+        if not str(telefono_val).isdigit():
+            return jsonify({'error': 'Teléfono inválido. Solo se permiten dígitos.'}), 400
     try:
         repositorio.crear_cliente(payload)
         return jsonify({'dni': payload.get('dni')}), 201
@@ -196,6 +223,16 @@ def api_actualizar_cliente(dni):
     # Do not allow changing DNI via this endpoint
     if 'dni' in payload and str(payload.get('dni')) != str(dni):
         return jsonify({'error': 'No está permitido cambiar el DNI de un cliente'}), 400
+    # validate provided fields
+    if 'nombre' in payload:
+        nombre_val = str(payload.get('nombre') or '')
+        if not re.match(r"^[A-Za-zÀ-ÿ\s]+$", nombre_val):
+            return jsonify({'error': 'Nombre inválido. Solo se permiten letras y espacios.'}), 400
+    if 'telefono' in payload:
+        telefono_val = payload.get('telefono')
+        if telefono_val is not None and str(telefono_val).strip() != '':
+            if not str(telefono_val).isdigit():
+                return jsonify({'error': 'Teléfono inválido. Solo se permiten dígitos.'}), 400
     try:
         repositorio.actualizar_cliente(dni, payload)
         # return the updated cliente (try new dni if provided)
@@ -378,6 +415,8 @@ def api_eliminar_reserva(reserva_id):
     try:
         repositorio.cancelar_reserva(reserva_id)
         return jsonify({'reserva_id': reserva_id, 'status': 'deleted'})
+    except ValueError as ve:
+        return jsonify({'error': str(ve)}), 400
     except Exception as e:
         return jsonify({'error': 'Error al eliminar reserva', 'detail': str(e)}), 500
 
