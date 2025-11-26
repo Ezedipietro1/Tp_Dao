@@ -1,18 +1,5 @@
 const API_BASE = 'http://127.0.0.1:5000';
-console.log('app.js loaded (v2)');
 let canchasCache = [];
-// Recent reservations created/updated in this client session (to avoid race conditions
-// when a second reservation is created immediately after the first and server
-// responses have not been refetched yet).
-let recentReservations = [];
-// token to prevent concurrent listarHorarios renders from appending duplicated DOM
-let horarioRenderToken = 0;
-// set of horario ids that belong to the reserva being edited (so they remain selectable)
-let editingReservaHorarioIds = new Set();
-// the original cancha id of the reserva being edited (used to detect cancha changes)
-let editingReservaOriginalCanchaId = null;
-// the original fecha (YYYY-MM-DD) of the reserva being edited
-let editingReservaOriginalFecha = null;
 
 async function fetchJSON(path, opts) {
   const res = await fetch(API_BASE + path, opts);
@@ -45,22 +32,11 @@ async function listarCanchas() {
       const btnEdit = document.createElement('button');
       btnEdit.className = 'btn btn-sm btn-outline-primary';
       btnEdit.textContent = 'Editar';
-      // if cancha has reservas, do not allow editing
-      if (c.has_reservas) {
-        btnEdit.disabled = true;
-        btnEdit.title = 'No se puede editar: existen reservas asociadas';
-      } else {
-        btnEdit.addEventListener('click', () => showEditCancha(cid));
-      }
+      btnEdit.addEventListener('click', () => showEditCancha(cid));
       const btnDelete = document.createElement('button');
       btnDelete.className = 'btn btn-sm btn-outline-danger';
       btnDelete.textContent = 'Eliminar';
-      if (c.has_reservas) {
-        btnDelete.disabled = true;
-        btnDelete.title = 'No se puede eliminar: existen reservas asociadas';
-      } else {
-        btnDelete.addEventListener('click', () => eliminarCancha(cid));
-      }
+      btnDelete.addEventListener('click', () => eliminarCancha(cid));
       actions.appendChild(btnEdit);
       actions.appendChild(btnDelete);
       item.appendChild(left);
@@ -317,11 +293,11 @@ async function aplicarFiltroCanchas() {
  * The horario select is disabled until a valid fecha >= today is selected.
  */
 async function listarHorarios(canchaId, fecha) {
-  const horarioList = document.getElementById('horario-list');
+  const horarioSelect = document.getElementById('horario-select');
   // require fecha
-  if (!horarioList) return;
   if (!fecha) {
-    horarioList.innerHTML = '<div class="text-muted">-- seleccionar fecha primero --</div>';
+    horarioSelect.innerHTML = '<option value="">-- seleccionar fecha primero --</option>';
+    horarioSelect.disabled = true;
     computeAndShowPrice();
     return;
   }
@@ -330,17 +306,22 @@ async function listarHorarios(canchaId, fecha) {
   const today = new Date();
   const selDate = new Date(fecha + 'T00:00:00');
   if (selDate.setHours(0,0,0,0) < new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) {
-    horarioList.innerHTML = '<div class="text-danger">Fecha inválida (anterior al día actual)</div>';
+    horarioSelect.innerHTML = '<option value="">Fecha inválida (anterior al día actual)</option>';
+    horarioSelect.disabled = true;
     computeAndShowPrice();
     return;
   }
 
-  horarioList.innerHTML = '<div class="text-muted">-- cargando horarios --</div>';
-  console.debug('[listarHorarios] start', { canchaId, fecha });
+  horarioSelect.innerHTML = '<option value="">-- cargando horarios --</option>';
+  horarioSelect.disabled = false;
   try {
-    const hs = await fetchJSON(`/horarios`);
-    // horarios are global (no dia_semana). Show all and let the user select one or more via checkboxes.
-    horarioList.innerHTML = '';
+  const hs = await fetchJSON(`/horarios`);
+    // horarios are global (no dia_semana). Show all and let the user select one or more.
+    horarioSelect.innerHTML = '';
+    // make the select allow multiple choices for multi-slot reservations
+    horarioSelect.multiple = true;
+    horarioSelect.size = Math.min(8, hs.length || 8);
+    horarioSelect.innerHTML = '<option value="" disabled>-- seleccionar uno o más horarios (Ctrl/Cmd+click) --</option>';
     // determine if fecha is today to disable past slots
     const todayStr = new Date().toISOString().slice(0,10);
     const fechaIsToday = (fecha === todayStr);
@@ -351,139 +332,45 @@ async function listarHorarios(canchaId, fecha) {
     const now = new Date();
     const nowMinutes = now.getHours()*60 + now.getMinutes();
 
-    // load existing reservas for this cancha/date and build a map horario_id -> [reserva_ids]
-    let reservedMap = new Map();
-    try {
-      if (!canchaId || isNaN(Number(canchaId))) {
-        console.debug('[listarHorarios] skipping reservas fetch: invalid canchaId', canchaId);
-      } else {
-        // add a timestamp to avoid stale cached responses
-        const reservas = await fetchJSON(`/reservas?cancha_id=${canchaId}&_ts=${Date.now()}`);
-        reservas.forEach(r => {
-          try {
-            if (r && r.fecha === fecha && Array.isArray(r.horarios)) {
-              r.horarios.forEach(hobj => {
-                const hid = Number(hobj.id);
-                if (!reservedMap.has(hid)) reservedMap.set(hid, []);
-                reservedMap.get(hid).push(r.id);
-              });
-            }
-          } catch (e) { /* ignore malformed reserva entries */ }
-        });
-      }
-    } catch (e) {
-      // if reservas endpoint fails, we continue but won't mark ocupados
-      console.warn('No se pudieron cargar reservas para marcar horarios ocupados', e);
-    }
-
-    // always merge recentReservations (even if the GET failed or returned empty)
-    try {
-      recentReservations.forEach(r => {
-        if (r && Number(r.cancha_id) === Number(canchaId) && String(r.fecha) === String(fecha)) {
-          if (Array.isArray(r.horarios)) {
-            r.horarios.forEach(hobj => {
-              const hid = Number(hobj.id);
-              if (!reservedMap.has(hid)) reservedMap.set(hid, []);
-              reservedMap.get(hid).push(r.id);
-            });
-          }
-        }
-      });
-    } catch (mergeErr) {
-      console.warn('Error merging recentReservations (post-fetch)', mergeErr);
-    }
-
-    // Debug: show editingReservaHorarioIds and reservedMap snapshot
-    try {
-      console.debug('[listarHorarios] editingReservaHorarioIds ->', Array.from(editingReservaHorarioIds || []));
-      const reservedSnapshot = {};
-      reservedMap.forEach((v, k) => { reservedSnapshot[k] = v.slice(); });
-      console.debug('[listarHorarios] reservedMap snapshot ->', reservedSnapshot);
-    } catch (dbgErr) { /* ignore debug errors */ }
-
-    // if another listarHorarios was started after this one, abort rendering
-    const myToken = ++horarioRenderToken;
-    console.debug('[listarHorarios] render token', myToken);
-
     hs.forEach(h => {
-      const id = h.id;
-      // if an element with this horario id already exists in the DOM, update it instead of skipping
-      let existingItem = null;
-      try {
-        existingItem = horarioList.querySelector(`#horario-${id}`) ? horarioList.querySelector(`#horario-${id}`).closest('.form-check') : null;
-        if (existingItem) {
-          console.debug('[listarHorarios] updating existing horario element', id);
-        }
-      } catch (e) { existingItem = null; }
-      const startM = parseToMinutes(h.inicio);
-      const disabledByTime = fechaIsToday && (startM < nowMinutes);
-
-      const item = existingItem || document.createElement('div');
-      item.className = 'form-check';
-
-      // create or reuse checkbox
-      let cb = item.querySelector(`#horario-${id}`);
-      if (!cb) {
-        cb = document.createElement('input');
-        cb.className = 'form-check-input';
-        cb.type = 'checkbox';
-        cb.id = `horario-${id}`;
-        cb.addEventListener('change', computeAndShowPrice);
-        item.appendChild(cb);
-      }
-      cb.value = JSON.stringify(h);
-      cb.dataset.hid = id;
-
-      // determine if this horario is occupied by any reserva
-      const occupiedBy = reservedMap.get(Number(id)) || [];
-      let occupied = false;
-      if (occupiedBy.length > 0) {
-        // Allow editingReservaHorarioIds to make horarios selectable ONLY if
-        // the user is editing a reserva that originally belongs to the same cancha+fecha.
-        const editingReservaMatchesContext = (editingReservaOriginalCanchaId != null && Number(editingReservaOriginalCanchaId) === Number(canchaId) && editingReservaOriginalFecha && String(editingReservaOriginalFecha) === String(fecha));
-        if (editingReservaMatchesContext && editingReservaHorarioIds && editingReservaHorarioIds.has(Number(id))) {
-          occupied = false;
-        } else if (typeof editingReservaId === 'number' && editingReservaId) {
-          // otherwise, consider occupied only if there are other reservas (not the one being edited)
-          const others = occupiedBy.filter(rid => Number(rid) !== Number(editingReservaId));
-          occupied = others.length > 0;
-        } else {
-          occupied = true;
+      const opt = document.createElement('option');
+      opt.value = JSON.stringify(h);
+      let label = `${h.inicio}-${h.fin}`;
+      // if fecha is today, disable slots that start earlier than current time
+      if (fechaIsToday) {
+        const startM = parseToMinutes(h.inicio);
+        if (startM < nowMinutes) {
+          opt.disabled = true;
+          label += ' — NO DISPONIBLE';
+          opt.title = 'Horario en el pasado (no disponible)';
         }
       }
-
-      if (disabledByTime || occupied) cb.disabled = true;
-
-      let label = item.querySelector(`label[for='horario-${id}']`);
-      if (!label) {
-        label = document.createElement('label');
-        label.className = 'form-check-label';
-        label.htmlFor = cb.id;
-        item.appendChild(label);
-      }
-      label.textContent = `${h.inicio}-${h.fin}` + (disabledByTime ? ' — NO DISPONIBLE' : (occupied ? ' — OCUPADO' : ''));
-      if (occupied) {
-        label.title = `Ocupado por reserva(s): ${reservedMap.get(Number(id)).join(', ')}`;
-      } else {
-        label.title = '';
-      }
-      // ensure this render is still current
-      if (myToken !== horarioRenderToken) {
-        console.debug('[listarHorarios] aborting update/append for', id, 'token', myToken, 'current', horarioRenderToken);
-        return;
-      }
-      console.debug('[listarHorarios] append/update horario', id, 'token', myToken);
-      if (!existingItem) horarioList.appendChild(item);
+      opt.textContent = label;
+      horarioSelect.appendChild(opt);
     });
     // recompute precio if needed
-    if (myToken === horarioRenderToken) computeAndShowPrice();
+    computeAndShowPrice();
   } catch (err) {
-    horarioList.innerHTML = `<div class="text-danger">Error: ${err.message}</div>`;
+    horarioSelect.innerHTML = `<option value="">Error: ${err.message}</option>`;
+    horarioSelect.disabled = true;
   }
-// NOTE: manual datetime inputs were removed; reservas must be created via fecha + horario
-// The form submit and cancha-select change listeners are attached once during initialization.
-
 }
+
+// NOTE: manual datetime inputs were removed; reservas must be created via fecha + horario
+// The form submit is handled by crearActualizarReserva (supports create and edit).
+document.getElementById('reserva-form').addEventListener('submit', crearActualizarReserva);
+document.getElementById('cancha-select').addEventListener('change', (e) => {
+  const v = parseInt(e.target.value, 10);
+  const fecha = document.getElementById('fecha-select').value;
+  if (v && fecha) listarHorarios(v, fecha);
+  else {
+    // require date first
+    const horarioSelect = document.getElementById('horario-select');
+    horarioSelect.innerHTML = '<option value="">-- seleccionar fecha primero --</option>';
+    horarioSelect.disabled = true;
+    document.getElementById('precio').value = '';
+  }
+});
 
 // when fecha changes, validate and (if cancha selected) reload horarios
 document.getElementById('fecha-select').addEventListener('change', (e) => {
@@ -495,8 +382,9 @@ document.getElementById('fecha-select').addEventListener('change', (e) => {
   if (canchaId && fecha) {
     listarHorarios(canchaId, fecha);
   } else {
-    const horarioList = document.getElementById('horario-list');
-    if (horarioList) horarioList.innerHTML = '<div class="text-muted">-- seleccionar fecha primero --</div>';
+    const horarioSelect = document.getElementById('horario-select');
+    horarioSelect.innerHTML = '<option value="">-- seleccionar fecha primero --</option>';
+    horarioSelect.disabled = true;
   }
 });
 
@@ -507,12 +395,11 @@ window.addEventListener('load', () => {
   const fechaEl = document.getElementById('fecha-select');
   if (fechaEl) fechaEl.setAttribute('min', todayStr);
   // disable horario until user picks a date
-  const horarioList = document.getElementById('horario-list');
-  if (horarioList) {
-    horarioList.innerHTML = '<div class="text-muted">-- seleccionar fecha primero --</div>';
+  const horarioSelect = document.getElementById('horario-select');
+  if (horarioSelect) {
+    horarioSelect.innerHTML = '<option value="">-- seleccionar fecha primero --</option>';
+    horarioSelect.disabled = true;
   }
-  const horarioListEl = document.getElementById('horario-list');
-  if (horarioListEl) horarioListEl.addEventListener('change', computeAndShowPrice);
   // delete-confirm modal handlers
   const delConfirm = document.getElementById('delete-cancha-confirm');
   const delCancel = document.getElementById('delete-cancha-cancel');
@@ -537,7 +424,7 @@ window.addEventListener('load', () => {
   // navigation buttons
   const show = (id) => {
     // hide all content sections
-    ['main-menu','canchas-section','reserva-section','clientes-section','reservas-section','reportes-section'].forEach(s => {
+    ['main-menu','canchas-section','reserva-section','clientes-section','reservas-section'].forEach(s => {
       const el = document.getElementById(s);
       if (el) el.classList.add('d-none');
     });
@@ -547,29 +434,17 @@ window.addEventListener('load', () => {
   document.getElementById('btn-canchas').addEventListener('click', () => { show('canchas-section'); listarCanchas(); });
   const btnCrearReserva = document.getElementById('btn-crear-reserva');
   if (btnCrearReserva) btnCrearReserva.addEventListener('click', () => {
-    console.debug('[UI] btn-crear-reserva clicked');
     // open reservation modal for creating a new reserva
-    try {
-      document.getElementById('reserva-form-title').textContent = 'Crear reserva';
-      openReservaModal();
-      const form = document.getElementById('reserva-form');
-      if (form) {
-        try { form.reset(); } catch (e) { console.warn('Could not reset reserva-form', e); }
-      }
-      editingReservaId = null;
-      try { editingReservaHorarioIds = new Set(); editingReservaOriginalCanchaId = null; } catch (e) {}
-      const horarioList = document.getElementById('horario-list');
-      if (horarioList) { horarioList.innerHTML = '<div class="text-muted">-- seleccionar fecha primero --</div>'; }
-      // load clients list into the select
-      try { populateClientesSelect(); } catch (e) { console.error('Error cargando clientes para crear reserva', e); }
-    } catch (err) {
-      console.error('[UI] error handling btn-crear-reserva click', err);
-      // ensure we don't accidentally navigate away; keep the reservas view visible
-      try { show('reservas-section'); } catch (e) {}
-    }
+    document.getElementById('reserva-form-title').textContent = 'Crear reserva';
+    openReservaModal();
+    try { document.getElementById('reserva-form').reset(); } catch (e) {}
+    editingReservaId = null;
+    const horarioSelect = document.getElementById('horario-select');
+    if (horarioSelect) { horarioSelect.innerHTML = '<option value="">-- seleccionar horario --</option>'; horarioSelect.disabled = true; }
+    // load clients list into the select
+    try { populateClientesSelect(); } catch (e) { console.error('Error cargando clientes para crear reserva', e); }
   });
   document.getElementById('btn-clientes').addEventListener('click', () => { show('clientes-section'); listarClientes(); });
-  document.getElementById('btn-reportes').addEventListener('click', () => { show('reportes-section'); listarReportes(); });
   // canchas UI hooks
   const btnCrear = document.getElementById('btn-crear-cancha');
   if (btnCrear) btnCrear.addEventListener('click', async () => {
@@ -614,32 +489,93 @@ window.addEventListener('load', () => {
   // reservas view
   const btnReservas = document.getElementById('btn-reservas');
   if (btnReservas) btnReservas.addEventListener('click', () => { show('reservas-section'); listarReservas(); });
+  // reportes view
+  const btnReportes = document.getElementById('btn-reportes');
+  if (btnReportes) btnReportes.addEventListener('click', () => { show('reportes-section'); });
+  const btnReporteReservas = document.getElementById('btn-reporte-reservas');
+  const btnReporteIngresos = document.getElementById('btn-reporte-ingresos');
+  const btnReporteClientes = document.getElementById('btn-reporte-clientes');
+  const btnReportePorCanchas = document.getElementById('btn-reporte-reservas-por-canchas');
+  function openReportViewer(title, url) {
+    const modal = document.getElementById('report-viewer-modal');
+    const iframe = document.getElementById('report-viewer-iframe');
+    const download = document.getElementById('report-viewer-download');
+    if (!modal || !iframe || !download) return;
+    document.getElementById('report-viewer-title').textContent = title;
+    iframe.src = url;
+    download.href = url + (url.includes('?') ? '&download=1' : '?download=1');
+    modal.classList.remove('d-none');
+  }
+  // wire report buttons
+  if (btnReporteReservas) btnReporteReservas.addEventListener('click', async () => {
+    const dni = prompt('Ingrese DNI del cliente para el reporte (solo números):');
+    if (!dni) return;
+    const url = `${API_BASE}/reportes/reservas/cliente/${encodeURIComponent(dni)}?download=0`;
+    openReportViewer(`Reservas - Cliente ${dni}`, url);
+  });
+  if (btnReporteIngresos) btnReporteIngresos.addEventListener('click', async () => {
+    const url = `${API_BASE}/reportes/canchas/mas-utilizadas?download=0`;
+    openReportViewer('Canchas más utilizadas', url);
+  });
+  if (btnReporteClientes) btnReporteClientes.addEventListener('click', async () => {
+    const anio = prompt('Año (YYYY) para el reporte de utilización mensual:');
+    if (!anio) return;
+    const url = `${API_BASE}/reportes/utilizacion/${encodeURIComponent(anio)}?download=0`;
+    openReportViewer(`Utilización mensual ${anio}`, url);
+  });
+  // abrir modal de selección de período para el nuevo reporte
+  if (btnReportePorCanchas) btnReportePorCanchas.addEventListener('click', (e) => {
+    e.preventDefault();
+    try {
+      console.log('[REPORTES] abrir modal periodo');
+      const modal = document.getElementById('report-period-modal');
+      if (!modal) { console.error('Modal de periodo no encontrado'); return; }
+      // set defaults: desde = hoy - 30d, hasta = hoy
+      const hoy = new Date().toISOString().slice(0,10);
+      const desdeEl = document.getElementById('report-desde');
+      const hastaEl = document.getElementById('report-hasta');
+      if (desdeEl && hastaEl) {
+        hastaEl.value = hoy;
+        const d = new Date(); d.setDate(d.getDate() - 30);
+        desdeEl.value = d.toISOString().slice(0,10);
+      }
+      modal.classList.remove('d-none');
+    } catch (err) {
+      console.error('Error mostrando modal de periodo:', err);
+    }
+  });
+
+  // handlers para el modal de periodo
+  const reportPeriodForm = document.getElementById('report-period-form');
+  const reportPeriodCancel = document.getElementById('report-period-cancel');
+  const reportPeriodClose = document.getElementById('report-period-close');
+  const reportPeriodBackdrop = document.getElementById('report-period-backdrop');
+  if (reportPeriodCancel) reportPeriodCancel.addEventListener('click', () => document.getElementById('report-period-modal').classList.add('d-none'));
+  if (reportPeriodClose) reportPeriodClose.addEventListener('click', () => document.getElementById('report-period-modal').classList.add('d-none'));
+  if (reportPeriodBackdrop) reportPeriodBackdrop.addEventListener('click', () => document.getElementById('report-period-modal').classList.add('d-none'));
+  if (reportPeriodForm) reportPeriodForm.addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    try {
+      const desde = document.getElementById('report-desde').value;
+      const hasta = document.getElementById('report-hasta').value;
+      if (!desde || !hasta) { alert('Ambas fechas son requeridas'); return; }
+      document.getElementById('report-period-modal').classList.add('d-none');
+      const url = `${API_BASE}/reportes/reservas/por-canchas?desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}&download=0`;
+      openReportViewer(`Reservas por canchas ${desde} — ${hasta}`, url);
+    } catch (err) {
+      console.error('Error procesando formulario de periodo:', err);
+      alert('Error procesando el período. Revisá la consola.');
+    }
+  });
+  // report viewer close handlers
+  const reportViewerClose = document.getElementById('report-viewer-close');
+  const reportViewerBackdrop = document.getElementById('report-viewer-backdrop');
+  if (reportViewerClose) reportViewerClose.addEventListener('click', () => document.getElementById('report-viewer-modal').classList.add('d-none'));
+  if (reportViewerBackdrop) reportViewerBackdrop.addEventListener('click', () => document.getElementById('report-viewer-modal').classList.add('d-none'));
   // back buttons inside sections
   document.querySelectorAll('.btn-back').forEach(b => b.addEventListener('click', () => show('main-menu')));
   // initial view: main menu
   show('main-menu');
-  // inicializar handlers de reportes
-  wireReportViewerHandlers();
-  // attach reserva form submit handler once
-  const reservaForm = document.getElementById('reserva-form');
-  if (reservaForm) reservaForm.addEventListener('submit', crearActualizarReserva);
-  // when cancha selection changes, if fecha is present reload horarios
-  const canchaSelectEl = document.getElementById('cancha-select');
-  if (canchaSelectEl) {
-    canchaSelectEl.addEventListener('change', (ev) => {
-      const newCancha = parseInt(ev.target.value, 10);
-      const fecha = document.getElementById('fecha-select').value;
-      console.debug('[UI] cancha-select changed', { newCancha, fecha, editingReservaId, editingReservaOriginalCanchaId });
-      // if we're editing a reserva and the cancha changed away from the original, clear horario ids
-      if (editingReservaId && editingReservaOriginalCanchaId != null && Number(newCancha) !== Number(editingReservaOriginalCanchaId)) {
-        console.debug('[UI] cancha changed during edit - clearing editingReservaHorarioIds and original identifiers');
-        try { editingReservaHorarioIds = new Set(); editingReservaOriginalCanchaId = null; editingReservaOriginalFecha = null; } catch (e) {}
-      }
-      if (newCancha && fecha) {
-        listarHorarios(newCancha, fecha);
-      }
-    });
-  }
   // Event delegation fallback for reservas list (handles Edit/Delete clicks reliably)
   const reservasList = document.getElementById('reservas-list');
   if (reservasList) {
@@ -802,25 +738,6 @@ async function crearActualizarCliente(e) {
     alert('DNI y Nombre son requeridos');
     return;
   }
-  // Frontend validation: dni 7-8 digits, nombre only letters/spaces, telefono digits only (if provided)
-  const dniDigits = /^[0-9]{7,8}$/;
-  const nombreRe = /^[A-Za-zÀ-ÿ\s]+$/;
-  const telefonoRe = /^\d*$/;
-  if (!dniDigits.test(dni)) {
-    showAlert('danger', 'DNI inválido: debe contener sólo 7 u 8 dígitos.');
-    if (dniEl) dniEl.focus();
-    return;
-  }
-  if (!nombreRe.test(nombre)) {
-    showAlert('danger', 'Nombre inválido: solo se permiten letras y espacios.');
-    if (nombreEl) nombreEl.focus();
-    return;
-  }
-  if (telefono && !telefonoRe.test(telefono)) {
-    showAlert('danger', 'Teléfono inválido: solo se permiten dígitos.');
-    if (telefonoEl) telefonoEl.focus();
-    return;
-  }
   const payload = { nombre, telefono };
   try {
     if (editingClienteDni) {
@@ -829,7 +746,6 @@ async function crearActualizarCliente(e) {
       const res = await fetchJSON(`/clientes/${encodeURIComponent(editingClienteDni)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       console.log('[CLIENTES] PUT response ->', res);
     } else {
-      // ensure we send dni as number when creating
       payload.dni = Number(dni);
       console.log('[CLIENTES] POST payload ->', payload, 'url ->', '/clientes');
       const res = await fetchJSON('/clientes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -865,60 +781,12 @@ function closeDeleteClienteModal() {
 async function confirmDeleteCliente() {
   if (!pendingDeleteClienteDni) return closeDeleteClienteModal();
   try {
-    // Use fetch directly so we can read error JSON and avoid relying on fetchJSON's thrown message
-    const url = API_BASE + `/clientes/${encodeURIComponent(pendingDeleteClienteDni)}`;
-    const res = await fetch(url, { method: 'DELETE' });
-    if (res.ok) {
-      // prefer server-provided id in response body
-      let respJson = {};
-      try { respJson = await res.json(); } catch (e) {}
-      const deletedId = respJson.dni || respJson.cliente_dni || pendingDeleteClienteDni;
-      closeDeleteClienteModal();
-      listarClientes();
-      showAlert('success', `Cliente ${deletedId} eliminado correctamente`);
-      return;
-    }
-    // try to read structured error from body
-    let bodyText = await res.text();
-    let userMsg = `HTTP ${res.status}`;
-    try {
-      const obj = JSON.parse(bodyText);
-      userMsg = obj.error || obj.detail || JSON.stringify(obj);
-    } catch (e) {
-      // if bodyText is plain text, use it
-      if (bodyText && bodyText.trim()) userMsg = bodyText.trim();
-    }
+    await fetchJSON(`/clientes/${encodeURIComponent(pendingDeleteClienteDni)}`, { method: 'DELETE' });
     closeDeleteClienteModal();
-    showAlert('danger', `Error eliminando cliente: ${userMsg}`);
+    listarClientes();
   } catch (err) {
     closeDeleteClienteModal();
-    console.error('Error eliminando cliente (network):', err);
-    showAlert('danger', `Error eliminando cliente: ${err.message || String(err)}`);
-  }
-}
-
-// showAlert: type = 'success' | 'danger' | 'warning' | 'info'
-function showAlert(type, message, timeout = 6000) {
-  const container = document.getElementById('alert-container');
-  if (!container) {
-    // fallback to alert()
-    alert(message);
-    return;
-  }
-  const wrapper = document.createElement('div');
-  wrapper.className = `alert alert-${type} alert-dismissible fade show`;
-  wrapper.setAttribute('role', 'alert');
-  wrapper.innerHTML = `
-    <div>${message}</div>
-    <button type="button" class="btn-close" aria-label="Close"></button>
-  `;
-  const closeBtn = wrapper.querySelector('.btn-close');
-  closeBtn.addEventListener('click', () => { try { container.removeChild(wrapper); } catch (e) {} });
-  container.appendChild(wrapper);
-  if (timeout > 0) {
-    setTimeout(() => {
-      try { wrapper.classList.remove('show'); wrapper.classList.add('hide'); container.removeChild(wrapper); } catch (e) {}
-    }, timeout);
+    alert('Error eliminando cliente: ' + err.message);
   }
 }
 
@@ -942,11 +810,21 @@ async function listarReservas() {
       btnEdit.textContent = 'Editar';
       btnEdit.setAttribute('data-action', 'edit');
       btnEdit.setAttribute('data-id', r.id);
+      btnEdit.addEventListener('click', () => {
+        try {
+          console.log('[UI] Edit reserva clicked:', r.id);
+          showEditReserva(r.id);
+        } catch (e) {
+          console.error('Error invoking showEditReserva:', e);
+          alert('Error al intentar editar la reserva. Ver consola para más detalles.');
+        }
+      });
       const btnDelete = document.createElement('button');
       btnDelete.className = 'btn btn-sm btn-outline-danger';
       btnDelete.textContent = 'Eliminar';
       btnDelete.setAttribute('data-action', 'delete');
       btnDelete.setAttribute('data-id', r.id);
+      btnDelete.addEventListener('click', () => eliminarReserva(r.id));
       actions.appendChild(btnEdit);
       actions.appendChild(btnDelete);
       item.appendChild(left);
@@ -973,25 +851,15 @@ async function showEditReserva(reservaId) {
     if (canchaSel) canchaSel.value = r.cancha_id || '';
     // set fecha
     const fechaEl = document.getElementById('fecha-select'); if (fechaEl) fechaEl.value = r.fecha || '';
-    // mark that we're editing this reserva so listarHorarios can allow its own horarios
-    editingReservaId = reservaId;
-    try {
-      editingReservaHorarioIds = new Set((r.horarios || []).map(h => Number(h.id)));
-    } catch (e) {
-      editingReservaHorarioIds = new Set();
-    }
-    // remember original cancha and fecha for this reserva so we can detect changes
-    try { editingReservaOriginalCanchaId = r.cancha_id || null; } catch (e) { editingReservaOriginalCanchaId = null; }
-    try { editingReservaOriginalFecha = r && r.fecha ? String(r.fecha).slice(0,10) : null; } catch (e) { editingReservaOriginalFecha = null; }
     // load horarios and mark selected
     await listarHorarios(r.cancha_id, r.fecha);
-    const horarioList = document.getElementById('horario-list');
-    if (horarioList && Array.isArray(r.horarios)) {
-      const selectedIds = new Set(r.horarios.map(h => Number(h.id)));
-      horarioList.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    const horarioSelect = document.getElementById('horario-select');
+    if (horarioSelect && Array.isArray(r.horarios)) {
+      // mark options whose JSON value id matches
+      Array.from(horarioSelect.options).forEach(opt => {
         try {
-          const obj = JSON.parse(cb.value);
-          cb.checked = selectedIds.has(Number(obj.id));
+          const obj = JSON.parse(opt.value);
+          opt.selected = r.horarios.some(h => Number(h.id) === Number(obj.id));
         } catch (e) {}
       });
     }
@@ -1003,13 +871,10 @@ async function showEditReserva(reservaId) {
   } catch (err) {
     console.error('Error in showEditReserva:', err);
     alert('Error cargando reserva: ' + err.message + '\nVer consola para más detalles.');
-    // clear editing flag on error
-    try { editingReservaId = null; } catch (e) {}
   }
 }
 
 function openReservaModal() {
-  console.debug('[UI] openReservaModal');
   const modal = document.getElementById('reserva-modal');
   if (modal) modal.classList.remove('d-none');
 }
@@ -1018,8 +883,6 @@ function closeReservaModal() {
   const modal = document.getElementById('reserva-modal');
   if (modal) modal.classList.add('d-none');
   try { document.getElementById('reserva-form').reset(); } catch (e) {}
-  // clear editing reservation context
-  try { editingReservaId = null; editingReservaHorarioIds = new Set(); editingReservaOriginalCanchaId = null; } catch (e) {}
 }
 
 async function crearActualizarReserva(e) {
@@ -1028,9 +891,9 @@ async function crearActualizarReserva(e) {
   const clienteSelect = document.getElementById('reserva-cliente-select');
   const clienteDni = clienteSelect ? String(clienteSelect.value).trim() : '';
   const fecha = document.getElementById('fecha-select').value;
-  const horarioContainer = document.getElementById('horario-list');
-  const checkedBoxes = horarioContainer ? Array.from(horarioContainer.querySelectorAll('input[type=checkbox]:checked')).filter(cb => !cb.disabled) : [];
-  const horario_objs = checkedBoxes.map(cb => JSON.parse(cb.value));
+  const horarioSelectEl = document.getElementById('horario-select');
+  const selectedOptions = Array.from(horarioSelectEl.selectedOptions).filter(o => o.value && !o.disabled);
+  const horario_objs = selectedOptions.map(o => JSON.parse(o.value));
   const horario_ids = horario_objs.map(h => h.id);
   const precio = parseFloat(document.getElementById('precio').value);
   if (!canchaId || !clienteDni || !fecha || horario_ids.length === 0 || isNaN(precio)) {
@@ -1043,32 +906,16 @@ async function crearActualizarReserva(e) {
       console.log('[RESERVAS] PUT payload ->', payload, 'url ->', `/reservas/${editingReservaId}`);
       const res = await fetchJSON(`/reservas/${editingReservaId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       console.log('[RESERVAS] PUT response ->', res);
-      // update recentReservations: remove any previous entry with this id and add the updated one
-      try {
-        recentReservations = recentReservations.filter(r => Number(r.id) !== Number(editingReservaId));
-        const updated = res.reserva ? res.reserva : { id: editingReservaId, cancha_id: canchaId, fecha: fecha, horarios: horario_objs };
-        // normalize horarios
-        const hrs = Array.isArray(updated.horarios) ? updated.horarios.map(h => (h && h.id ? { id: h.id, inicio: h.inicio, fin: h.fin } : h)) : horario_objs.map(h => ({ id: h.id, inicio: h.inicio, fin: h.fin }));
-        recentReservations.push({ id: updated.id || editingReservaId, cancha_id: canchaId, fecha: fecha, horarios: hrs });
-      } catch (e) { console.warn('Error updating recentReservations after PUT', e); }
       editingReservaId = null;
     } else {
       console.log('[RESERVAS] POST payload ->', payload);
       const res = await fetchJSON('/reservas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       console.log('[RESERVAS] POST response ->', res);
-      try {
-        const newId = res.reserva_id || res.id;
-        const hrs = horario_objs.map(h => ({ id: h.id, inicio: h.inicio, fin: h.fin }));
-        if (newId) {
-            recentReservations.push({ id: newId, cancha_id: canchaId, fecha: fecha, horarios: hrs });
-          }
-        try { editingReservaHorarioIds = new Set(); } catch (e) {}
-      } catch (e) { console.warn('Error adding recentReservations after POST', e); }
     }
     // close modal, reset form and refresh lists
     closeReservaModal();
     document.getElementById('reserva-form').reset();
-    const horarioListAfter = document.getElementById('horario-list'); if (horarioListAfter) horarioListAfter.innerHTML = '<div class="text-muted">-- seleccionar fecha primero --</div>';
+    const horarioSelect = document.getElementById('horario-select'); if (horarioSelect) { horarioSelect.innerHTML = '<option value="">-- seleccionar horario --</option>'; horarioSelect.disabled = true; }
     try { await populateClientesSelect(); } catch (e) { /* ignore */ }
     listarReservas();
     listarCanchas();
@@ -1120,33 +967,12 @@ function closeDeleteReservaModal() {
 async function confirmDeleteReserva() {
   if (!pendingDeleteReservaId) return closeDeleteReservaModal();
   try {
-    const url = API_BASE + `/reservas/${pendingDeleteReservaId}`;
-    const res = await fetch(url, { method: 'DELETE' });
-    if (res.ok) {
-      let respJson = {};
-      try { respJson = await res.json(); } catch (e) {}
-      const deletedId = respJson.reserva_id || respJson.id || pendingDeleteReservaId;
-      // remove any in-memory recent reservation matching this id
-      try { recentReservations = recentReservations.filter(r => Number(r.id) !== Number(deletedId)); } catch (e) { /* ignore */ }
-      closeDeleteReservaModal();
-      listarReservas();
-      showAlert('success', `Reserva ${deletedId} eliminada correctamente`);
-      return;
-    }
-    let bodyText = await res.text();
-    let userMsg = `HTTP ${res.status}`;
-    try {
-      const obj = JSON.parse(bodyText);
-      userMsg = obj.error || obj.detail || JSON.stringify(obj);
-    } catch (e) {
-      if (bodyText && bodyText.trim()) userMsg = bodyText.trim();
-    }
+    await fetchJSON(`/reservas/${pendingDeleteReservaId}`, { method: 'DELETE' });
     closeDeleteReservaModal();
-    showAlert('danger', `Error eliminando reserva: ${userMsg}`);
+    listarReservas();
   } catch (err) {
     closeDeleteReservaModal();
-    console.error('Error eliminando reserva (network):', err);
-    showAlert('danger', `Error eliminando reserva: ${err.message || String(err)}`);
+    alert('Error eliminando reserva: ' + err.message);
   }
 }
 
@@ -1159,14 +985,14 @@ if (reservaCancelBtn) reservaCancelBtn.addEventListener('click', () => closeRese
 function computeAndShowPrice() {
   try {
     const canchaId = parseInt(document.getElementById('cancha-select').value, 10);
-    const horarioList = document.getElementById('horario-list');
+    const horarioSelect = document.getElementById('horario-select');
     const precioEl = document.getElementById('precio');
-    if (!canchaId || !horarioList) {
+    if (!canchaId || !horarioSelect) {
       if (precioEl) precioEl.value = '';
       return;
     }
-    const checkedBoxes = Array.from(horarioList.querySelectorAll('input[type=checkbox]:checked')).filter(cb => !cb.disabled);
-    if (checkedBoxes.length === 0) {
+    const selectedOptions = Array.from(horarioSelect.selectedOptions).filter(o => o.value && !o.disabled);
+    if (selectedOptions.length === 0) {
       if (precioEl) precioEl.value = '';
       return;
     }
@@ -1177,16 +1003,16 @@ function computeAndShowPrice() {
       return parts[0]*60 + (parts[1]||0);
     }
     let totalHours = 0;
-    checkedBoxes.forEach(cb => {
+    selectedOptions.forEach(opt => {
       try {
-        const h = JSON.parse(cb.value);
+        const h = JSON.parse(opt.value);
         const startM = parseToMinutes(h.inicio);
         const endM = parseToMinutes(h.fin);
         let diff = endM - startM;
         if (diff <= 0) diff += 24*60;
         totalHours += diff/60;
       } catch (e) {
-        // ignore malformed value
+        // ignore malformed option
       }
     });
     const total = Math.round((totalHours * precioHora + Number.EPSILON) * 100) / 100;
@@ -1196,154 +1022,7 @@ function computeAndShowPrice() {
   }
 }
 
-// attach compute price listener once (attached earlier during window.load)
-
-// --- Reportes ---
-// ---------- Reportes: listar y ver en modal ----------
-
-async function listarReportes() {
-  const listEl = document.getElementById('reportes-list');
-  if (!listEl) return;
-  listEl.innerHTML = '<p class="text-muted">Selecciona un tipo de reporte para ver los disponibles.</p>';
-
-  // wire botones para mostrar el listado correspondiente
-  const btnReservas = document.getElementById('btn-reporte-reservas');
-  const btnIngresos = document.getElementById('btn-reporte-ingresos');
-  const btnClientes = document.getElementById('btn-reporte-clientes');
-
-  if (btnReservas) {
-    btnReservas.onclick = () => listReportesReservas();
-  }
-  if (btnIngresos) {
-    btnIngresos.onclick = () => listReportesCanchas();
-  }
-  if (btnClientes) {
-    btnClientes.onclick = () => listReportesUtilizacion();
-  }
-}
-
-function makeListGroupItem(title, subtitle, onClick) {
-  const item = document.createElement('div');
-  item.className = 'list-group-item d-flex justify-content-between align-items-start';
-  const left = document.createElement('div');
-  left.innerHTML = `<div><strong>${title}</strong></div><div class="small text-muted">${subtitle || ''}</div>`;
-  const right = document.createElement('div');
-  const btn = document.createElement('button');
-  btn.className = 'btn btn-sm btn-primary';
-  btn.textContent = 'Ver';
-  btn.addEventListener('click', onClick);
-  right.appendChild(btn);
-  item.appendChild(left);
-  item.appendChild(right);
-  return item;
-}
-
-async function listReportesReservas() {
-  const listEl = document.getElementById('reportes-list');
-  if (!listEl) return;
-  listEl.innerHTML = '<div class="text-muted">Cargando clientes...</div>';
-  try {
-    const clientes = await fetchJSON('/clientes');
-    listEl.innerHTML = '';
-    if (!clientes || clientes.length === 0) {
-      listEl.innerHTML = '<p class="text-warning">No hay clientes registrados.</p>';
-      return;
-    }
-    clientes.forEach(c => {
-      const dni = c.dni;
-      const nombre = c.nombre || `DNI ${dni}`;
-      const item = makeListGroupItem(nombre, `DNI: ${dni}`, () => {
-        const url = `${API_BASE}/reportes/reservas/cliente/${encodeURIComponent(dni)}`;
-        viewReport(url, `Reservas - ${nombre}`);
-      });
-      listEl.appendChild(item);
-    });
-  } catch (err) {
-    listEl.innerHTML = `<div class="text-danger">Error obteniendo clientes: ${err.message}</div>`;
-  }
-}
-
-function listReportesCanchas() {
-  const listEl = document.getElementById('reportes-list');
-  if (!listEl) return;
-  listEl.innerHTML = '';
-  // Opciones predefinidas de límite
-  const limites = [5, 10, 20];
-  limites.forEach(n => {
-    const title = `Top ${n} - Canchas más utilizadas`;
-    const item = makeListGroupItem(title, `Ranking de canchas por cantidad de reservas (límite ${n})`, () => {
-      const url = `${API_BASE}/reportes/canchas/mas-utilizadas?limite=${n}`;
-      viewReport(url, title);
-    });
-    listEl.appendChild(item);
-  });
-}
-
-async function listReportesUtilizacion() {
-  const listEl = document.getElementById('reportes-list');
-  if (!listEl) return;
-  listEl.innerHTML = '<div class="text-muted">Cargando años disponibles...</div>';
-  try {
-    const reservas = await fetchJSON('/reservas');
-    const yearsSet = new Set();
-    (reservas || []).forEach(r => {
-      if (r && r.fecha) {
-        const y = ('' + r.fecha).slice(0,4);
-        if (/^\d{4}$/.test(y)) yearsSet.add(Number(y));
-      }
-    });
-    const years = Array.from(yearsSet).sort((a,b) => b - a);
-    if (years.length === 0) {
-      // si no hay reservas, mostrar el año actual como opción
-      years.push(new Date().getFullYear());
-    }
-    listEl.innerHTML = '';
-    years.forEach(y => {
-      const title = `Utilización mensual - ${y}`;
-      const item = makeListGroupItem(title, `Ver utilización mensual del año ${y}`, () => {
-        const url = `${API_BASE}/reportes/utilizacion/${y}`;
-        viewReport(url, title);
-      });
-      listEl.appendChild(item);
-    });
-  } catch (err) {
-    listEl.innerHTML = `<div class="text-danger">Error cargando reservas: ${err.message}</div>`;
-  }
-}
-
-function viewReport(url, title) {
-  try {
-    const modal = document.getElementById('report-viewer-modal');
-    const iframe = document.getElementById('report-viewer-iframe');
-    const titleEl = document.getElementById('report-viewer-title');
-    const dl = document.getElementById('report-viewer-download');
-    if (!modal || !iframe || !titleEl || !dl) return;
-    titleEl.textContent = title || 'Reporte';
-    // set iframe src (inline view) and download link
-    iframe.src = url; // server returns PDF inline
-    // build download url (add download=1)
-    const downloadUrl = url + (url.includes('?') ? '&' : '?') + 'download=1';
-    dl.href = downloadUrl;
-    modal.classList.remove('d-none');
-  } catch (e) {
-    alert('No se pudo abrir el reporte: ' + (e.message || e));
-  }
-}
-
-function closeReportViewer() {
-  const modal = document.getElementById('report-viewer-modal');
-  const iframe = document.getElementById('report-viewer-iframe');
-  if (modal) modal.classList.add('d-none');
-  if (iframe) iframe.src = '';
-}
-
-// wire close/backdrop handlers (call this during initialization)
-function wireReportViewerHandlers() {
-  const closeBtn = document.getElementById('report-viewer-close');
-  const backdrop = document.getElementById('report-viewer-backdrop');
-  if (closeBtn) closeBtn.addEventListener('click', closeReportViewer);
-  if (backdrop) backdrop.addEventListener('click', closeReportViewer);
-}
+document.getElementById('horario-select').addEventListener('change', computeAndShowPrice);
 
 // expose helpers to global scope for debugging and inline onclick usage
 try {
@@ -1353,3 +1032,60 @@ try {
 } catch (e) {
   // ignore in non-browser env
 }
+
+// Global safe helper used by inline onclick in the report-period modal.
+// This is defensive: it will work even if other event wiring fails.
+try {
+  window.__showReportForPeriod = function() {
+    try {
+      const desde = document.getElementById('report-desde')?.value;
+      const hasta = document.getElementById('report-hasta')?.value;
+      if (!desde || !hasta) { alert('Ambas fechas son requeridas'); return; }
+      const url = `${API_BASE}/reportes/reservas/por-canchas?desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}&download=0`;
+      const modal = document.getElementById('report-period-modal');
+      if (modal) modal.classList.add('d-none');
+      const viewerModal = document.getElementById('report-viewer-modal');
+      const iframe = document.getElementById('report-viewer-iframe');
+      const download = document.getElementById('report-viewer-download');
+      const title = document.getElementById('report-viewer-title');
+      if (iframe) iframe.src = url;
+      if (download) download.href = url + '&download=1';
+      if (title) title.textContent = `Reservas por canchas ${desde} — ${hasta}`;
+      if (viewerModal) viewerModal.classList.remove('d-none');
+    } catch (err) {
+      console.error('Error en __showReportForPeriod:', err);
+      alert('Error al generar el reporte. Revisá la consola para más detalles.');
+    }
+  };
+} catch (e) {
+  // ignore in non-browser env
+}
+
+// Fallback handler: if the specific report button exists but the main
+// initialization didn't wire it (cache or load ordering issues), attach
+// a simple click handler to open the periodo modal so the button is responsive.
+(function attachFallbackReportButton(){
+  try {
+    const btn = document.getElementById('btn-reporte-reservas-por-canchas');
+    if (!btn) return;
+    // don't double-attach
+    if (btn._fallbackAttached) return;
+    btn.addEventListener('click', (e) => {
+      try {
+        e.preventDefault();
+        const modal = document.getElementById('report-period-modal');
+        if (!modal) {
+          console.warn('Modal de periodo no encontrado');
+          alert('No se encontró el modal de selección de período. Recargá la página e intentá de nuevo.');
+          return;
+        }
+        modal.classList.remove('d-none');
+      } catch (err) {
+        console.error('Error fallback reporte por canchas:', err);
+      }
+    });
+    btn._fallbackAttached = true;
+  } catch (err) {
+    // silenciar errores en entornos no-browser
+  }
+})();
