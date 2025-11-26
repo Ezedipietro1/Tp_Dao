@@ -20,6 +20,10 @@ import tempfile
 from datetime import datetime
 from typing import List, Tuple, Optional
 
+import matplotlib
+# Force a non-interactive backend so matplotlib does not try to use GUI toolkits
+# (Tk, Qt, etc.) when running inside the Flask server threads.
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
@@ -28,6 +32,33 @@ from reportlab.lib.units import inch
 from reportlab.platypus import Image as RLImage
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 from reportlab.platypus.tables import Table, TableStyle
+
+
+def _crear_grafico_barras(labels: List[str], values: List[int], titulo: str, figsize=(6, 2.5)) -> str:
+    """Genera un gráfico de barras en PNG y devuelve la ruta del archivo temporal.
+
+    El llamador es responsable de borrar el archivo luego de usarlo.
+    """
+    fd, path = tempfile.mkstemp(suffix='.png')
+    os.close(fd)
+    try:
+        plt.figure(figsize=figsize)
+        # si las etiquetas son muchas, rotar
+        if len(labels) > 8:
+            plt.xticks(rotation=45, ha='right')
+        plt.bar(labels, values, color="#4c72b0")
+        plt.title(titulo)
+        plt.tight_layout()
+        plt.savefig(path)
+        plt.close()
+        return path
+    except Exception:
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
+        raise
 
 
 def obtener_conexion(db_path: str) -> sqlite3.Connection:
@@ -147,7 +178,38 @@ def reporte_reservas_por_cliente(db_path: str, cliente_id: int, ruta_pdf: str) -
         table = Table(table_data, colWidths=[1.5 * inch, 1.25 * inch, 1.25 * inch, 2 * inch])
         table.setStyle(_estilo_tabla())
         elements.append(table)
+        # Agregar gráfico de reservas por mes para este cliente (si hay datos)
+        # calcular conteo por mes
+        counts = [0] * 12
+        for r in reservas:
+            try:
+                fecha = r['fecha']
+                m = int(fecha[5:7])
+                if 1 <= m <= 12:
+                    counts[m - 1] += 1
+            except Exception:
+                continue
+
+        tmp_images = []
+        if sum(counts) > 0:
+            months = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+            tmp_img = _crear_grafico_barras(months, counts, f"Reservas por mes — Cliente {cliente['dni']}")
+            tmp_images.append(tmp_img)
+            try:
+                img = RLImage(tmp_img, width=6 * inch, height=2.5 * inch)
+                elements.append(Spacer(1, 0.2 * inch))
+                elements.append(img)
+            except Exception:
+                elements.append(Paragraph("(No se pudo insertar la imagen del gráfico)", styles["Normal"]))
+
         doc.build(elements)
+        # eliminar archivos temporales de imagen después de generar el PDF
+        for p in tmp_images:
+            try:
+                if p and os.path.exists(p):
+                    os.remove(p)
+            except Exception:
+                pass
 
     finally:
         conn.close()
@@ -235,7 +297,32 @@ def reporte_reservas_por_cancha_en_periodo(
         table = Table(table_data, colWidths=[1.5 * inch, 1.25 * inch, 1.25 * inch, 2 * inch])
         table.setStyle(_estilo_tabla())
         elements.append(table)
+        # Agregar gráfico de reservas por fecha en el período
+        counts_by_date = {}
+        for r in reservas:
+            d = r['fecha']
+            counts_by_date[d] = counts_by_date.get(d, 0) + 1
+
+        tmp_images = []
+        if counts_by_date:
+            fechas = sorted(counts_by_date.keys())
+            valores = [counts_by_date[d] for d in fechas]
+            tmp_img = _crear_grafico_barras(fechas, valores, f"Reservas por fecha — Cancha {cancha_id}", figsize=(6, 2.5))
+            tmp_images.append(tmp_img)
+            try:
+                img = RLImage(tmp_img, width=6 * inch, height=2.5 * inch)
+                elements.append(Spacer(1, 0.2 * inch))
+                elements.append(img)
+            except Exception:
+                elements.append(Paragraph("(No se pudo insertar la imagen del gráfico)", styles["Normal"]))
+
         doc.build(elements)
+        for p in tmp_images:
+            try:
+                if p and os.path.exists(p):
+                    os.remove(p)
+            except Exception:
+                pass
 
     finally:
         conn.close()
@@ -287,7 +374,28 @@ def reporte_canchas_mas_utilizadas(db_path: str, ruta_pdf: str, limite: int = 10
         table = Table(table_data, colWidths=[0.8 * inch, 1.5 * inch, 2 * inch, 1.5 * inch])
         table.setStyle(_estilo_tabla())
         elements.append(table)
+        # Agregar gráfico horizontal con top canchas
+        labels = [f"Cancha {f['cancha_id']}" for f in filas]
+        values = [int(f['reservas_count']) for f in filas]
+        if any(values):
+            labels_rev = labels[::-1]
+            values_rev = values[::-1]
+            tmp_img = _crear_grafico_barras(labels_rev, values_rev, "Ranking de canchas (más utilizadas)", figsize=(6, max(2.5, 0.4 * len(labels_rev))))
+            tmp_images = [tmp_img]
+            try:
+                img = RLImage(tmp_img, width=6 * inch, height=2.5 * inch)
+                elements.append(Spacer(1, 0.3 * inch))
+                elements.append(img)
+            except Exception:
+                elements.append(Paragraph("(No se pudo insertar la imagen del gráfico)", styles["Normal"]))
+
         doc.build(elements)
+        for p in locals().get('tmp_images', []):
+            try:
+                if p and os.path.exists(p):
+                    os.remove(p)
+            except Exception:
+                pass
 
     finally:
         conn.close()
@@ -375,6 +483,85 @@ def reporte_utilizacion_mensual(db_path: str, anio: int, ruta_pdf: str) -> None:
                     os.remove(tmp_img)
                 except Exception:
                     pass
+
+    finally:
+        conn.close()
+
+
+def reporte_reservas_por_canchas_en_periodo(db_path: str, fecha_desde: str, fecha_hasta: str, ruta_pdf: str) -> None:
+    """Genera un PDF con la cantidad de reservas por cancha en el período indicado.
+
+    Args:
+        db_path: Ruta a la BD.
+        fecha_desde: 'YYYY-MM-DD'
+        fecha_hasta: 'YYYY-MM-DD'
+        ruta_pdf: ruta de salida del PDF.
+    """
+    try:
+        conn = obtener_conexion(db_path)
+    except Exception as e:
+        raise RuntimeError(f"No se pudo conectar a la BD: {e}")
+
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT ca.id AS cancha_id, tc.nombre AS tipo_nombre, COUNT(r.id) AS reservas_count "
+            "FROM cancha ca LEFT JOIN tipo_cancha tc ON ca.tipo_cancha_id = tc.id "
+            "LEFT JOIN reserva r ON r.cancha_id = ca.id AND r.fecha BETWEEN ? AND ? "
+            "GROUP BY ca.id ORDER BY reservas_count DESC",
+            (fecha_desde, fecha_hasta),
+        )
+        filas = cur.fetchall()
+
+        doc = SimpleDocTemplate(ruta_pdf, pagesize=letter)
+        elements = []
+        styles = getSampleStyleSheet()
+
+        elements.append(Paragraph("Reservas por cancha en período", styles["Title"]))
+        elements.append(Spacer(1, 0.1 * inch))
+        rango = f"Período: {fecha_desde} — {fecha_hasta}"
+        elements.append(Paragraph(rango, styles["Normal"]))
+        elements.append(Spacer(1, 0.2 * inch))
+
+        if not filas:
+            elements.append(Paragraph("No hay reservas en el período indicado.", styles["Normal"]))
+            doc.build(elements)
+            return
+
+        table_data = [["Cancha", "Tipo", "Cantidad de reservas"]]
+        labels = []
+        values = []
+        for f in filas:
+            cancha_label = f"Cancha {f['cancha_id']}"
+            tipo = f["tipo_nombre"] or "N/D"
+            cnt = int(f["reservas_count"])
+            table_data.append([cancha_label, tipo, str(cnt)])
+            labels.append(cancha_label)
+            values.append(cnt)
+
+        table = Table(table_data, colWidths=[1.5 * inch, 2 * inch, 1.5 * inch])
+        table.setStyle(_estilo_tabla())
+        elements.append(table)
+
+        tmp_images = []
+        if any(values):
+            tmp_img = _crear_grafico_barras(labels, values, f"Reservas por cancha ({fecha_desde} — {fecha_hasta})", figsize=(8, 3))
+            tmp_images.append(tmp_img)
+            try:
+                img = RLImage(tmp_img, width=6 * inch, height=2.5 * inch)
+                elements.append(Spacer(1, 0.3 * inch))
+                elements.append(img)
+            except Exception:
+                elements.append(Paragraph("(No se pudo insertar la imagen del gráfico)", styles["Normal"]))
+
+        doc.build(elements)
+
+        for p in tmp_images:
+            try:
+                if p and os.path.exists(p):
+                    os.remove(p)
+            except Exception:
+                pass
 
     finally:
         conn.close()

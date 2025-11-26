@@ -538,6 +538,41 @@ def api_reporte_canchas_mas_utilizadas():
             pass
 
 
+
+@app.route('/reportes/reservas/por-canchas', methods=['GET'])
+def api_reporte_reservas_por_canchas_periodo():
+    fecha_desde = request.args.get('desde')
+    fecha_hasta = request.args.get('hasta')
+    if not fecha_desde or not fecha_hasta:
+        return jsonify({'error': 'Parámetros required: desde, hasta (YYYY-MM-DD)'}), 400
+    download = request.args.get('download', '0') == '1'
+    try:
+        from db.connection import DEFAULT_DB
+        from reportes import reporte_reservas_por_canchas_en_periodo
+    except Exception as e:
+        return jsonify({'error': 'Módulo de reportes no disponible', 'detail': str(e)}), 500
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
+    tmp.close()
+    try:
+        reporte_reservas_por_canchas_en_periodo(DEFAULT_DB, fecha_desde, fecha_hasta, tmp.name)
+        with open(tmp.name, 'rb') as f:
+            data = f.read()
+        resp = make_response(data)
+        resp.headers['Content-Type'] = 'application/pdf'
+        filename = f'reporte_reservas_canchas_{fecha_desde}_{fecha_hasta}.pdf'
+        if download:
+            resp.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        else:
+            resp.headers['Content-Disposition'] = f'inline; filename="{filename}"'
+        return resp
+    finally:
+        try:
+            os.remove(tmp.name)
+        except Exception:
+            pass
+
+
 @app.route('/reportes/utilizacion/<int:anio>', methods=['GET'])
 def api_reporte_utilizacion_mensual(anio: int):
     download = request.args.get('download', '0') == '1'

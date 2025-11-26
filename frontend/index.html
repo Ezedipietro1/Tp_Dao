@@ -23,6 +23,33 @@
       </div>
     </section>
 
+    <!-- Modal para seleccionar período de reportes -->
+    <div id="report-period-modal" class="modal-overlay d-none">
+      <div class="modal-backdrop" id="report-period-backdrop" onclick="document.getElementById('report-period-modal').classList.add('d-none')"></div>
+      <div class="modal-box" style="max-width:400px;" onclick="event.stopPropagation()">
+        <div class="modal-header d-flex justify-content-between align-items-center">
+          <h3>Seleccionar período</h3>
+          <button id="report-period-close" class="btn-close" aria-label="Cerrar"></button>
+        </div>
+          <div class="modal-body">
+          <form id="report-period-form" onsubmit="return false;">
+            <div class="mb-2">
+              <label class="form-label">Desde</label>
+              <input id="report-desde" type="date" class="form-control" required />
+            </div>
+            <div class="mb-2">
+              <label class="form-label">Hasta</label>
+              <input id="report-hasta" type="date" class="form-control" required />
+            </div>
+            <div class="d-flex gap-2">
+              <button id="report-period-submit" class="btn btn-primary" type="button" onclick="(function(){try{const desde=document.getElementById('report-desde').value;const hasta=document.getElementById('report-hasta').value;if(!desde||!hasta){alert('Ambas fechas son requeridas');return;}const url=location.protocol+'//'+location.hostname+':5000/reportes/reservas/por-canchas?desde='+encodeURIComponent(desde)+'&hasta='+encodeURIComponent(hasta)+'&download=0';document.getElementById('report-period-modal').classList.add('d-none');var iframe=document.getElementById('report-viewer-iframe');if(iframe)iframe.src=url;var dl=document.getElementById('report-viewer-download');if(dl)dl.href=url+'&download=1';var title=document.getElementById('report-viewer-title');if(title)title.textContent='Reservas por canchas '+desde+' — '+hasta;var vm=document.getElementById('report-viewer-modal');if(vm)vm.classList.remove('d-none');}catch(e){console.error(e);alert('Error al abrir el reporte. Ver consola.');}})()">Mostrar</button>
+              <button id="report-period-cancel" class="btn btn-secondary" type="button" onclick="document.getElementById('report-period-modal').classList.add('d-none')">Cancelar</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
     <section id="canchas-section" class="mb-4 d-none">
   <button class="btn btn-primary btn-back mb-2">← Volver</button>
       <h2>Canchas</h2>
@@ -53,10 +80,11 @@
     <section id="reportes-section" class="mb-4 d-none">
   <button class="btn btn-primary btn-back mb-2">← Volver</button>
       <h2>Reportes</h2>
-      <div class="mb-3 d-flex gap-2">
+        <div class="mb-3 d-flex gap-2">
         <button id="btn-reporte-reservas" class="btn btn-info">Listado de reservas por cliente</button>
         <button id="btn-reporte-ingresos" class="btn btn-info">Canchas más utilizadas</button>
         <button id="btn-reporte-clientes" class="btn btn-info">Utilización mensual de canchas</button>
+        <button id="btn-reporte-reservas-por-canchas" class="btn btn-info" onclick="document.getElementById('report-period-modal').classList.remove('d-none')">Reservas por canchas en período</button>
       </div>
       <div id="reportes-list" class="list-group"></div>
     </section>
