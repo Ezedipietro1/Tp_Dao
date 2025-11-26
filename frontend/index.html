@@ -6,6 +6,8 @@
   <title>Don Balon</title>
   <link rel="stylesheet" href="styles.css" />
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Chart.js for interactive charts -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
   <div id="app-root" class="container py-4">
@@ -42,7 +44,7 @@
               <input id="report-hasta" type="date" class="form-control" required />
             </div>
             <div class="d-flex gap-2">
-              <button id="report-period-submit" class="btn btn-primary" type="button" onclick="(function(){try{const desde=document.getElementById('report-desde').value;const hasta=document.getElementById('report-hasta').value;if(!desde||!hasta){alert('Ambas fechas son requeridas');return;}const url=location.protocol+'//'+location.hostname+':5000/reportes/reservas/por-canchas?desde='+encodeURIComponent(desde)+'&hasta='+encodeURIComponent(hasta)+'&download=0';document.getElementById('report-period-modal').classList.add('d-none');var iframe=document.getElementById('report-viewer-iframe');if(iframe)iframe.src=url;var dl=document.getElementById('report-viewer-download');if(dl)dl.href=url+'&download=1';var title=document.getElementById('report-viewer-title');if(title)title.textContent='Reservas por canchas '+desde+' — '+hasta;var vm=document.getElementById('report-viewer-modal');if(vm)vm.classList.remove('d-none');}catch(e){console.error(e);alert('Error al abrir el reporte. Ver consola.');}})()">Mostrar</button>
+              <button id="report-period-submit" class="btn btn-primary" type="button" onclick="(function(){try{const d=document.getElementById('report-desde').value;const h=document.getElementById('report-hasta').value;if(!d||!h){alert('Ambas fechas son requeridas');return;} if(window.__renderReservasPorCanchas){ window.__renderReservasPorCanchas(d,h); } else { alert('Función de reporte no disponible'); } }catch(e){console.error(e);alert('Error al abrir el reporte. Ver consola.');}})()">Mostrar</button>
               <button id="report-period-cancel" class="btn btn-secondary" type="button" onclick="document.getElementById('report-period-modal').classList.add('d-none')">Cancelar</button>
             </div>
           </form>
@@ -87,6 +89,44 @@
         <button id="btn-reporte-reservas-por-canchas" class="btn btn-info" onclick="document.getElementById('report-period-modal').classList.remove('d-none')">Reservas por canchas en período</button>
       </div>
       <div id="reportes-list" class="list-group"></div>
+      <!-- Interactive report panel (renders JSON results here) -->
+      <div id="report-interactive" class="mt-3 d-none">
+        <div class="card">
+          <div class="card-body">
+            <h4 id="report-interactive-title">Reservas por canchas</h4>
+            <div class="row g-2 mb-3">
+              <div class="col-auto">
+                <label class="form-label">Desde</label>
+                <input id="ri-desde" type="date" class="form-control" />
+              </div>
+              <div class="col-auto">
+                <label class="form-label">Hasta</label>
+                <input id="ri-hasta" type="date" class="form-control" />
+              </div>
+              <div class="col-auto">
+                <label class="form-label">Cliente (puede seleccionar varios)</label>
+                <div class="multiselect">
+                  <button id="ri-cliente-button" type="button" class="btn btn-light form-control text-start">-- Todos los clientes --</button>
+                  <div id="ri-cliente-menu" class="multiselect-menu d-none" style="max-height:220px; overflow:auto;">
+                    <!-- items: <label><input type="checkbox" data-dni="..."> Nombre (DNI)</label> -->
+                  </div>
+                </div>
+              </div>
+              <div class="col-auto align-self-end">
+                <button id="ri-filtrar" class="btn btn-primary">Filtrar</button>
+                  <button id="ri-export" class="btn btn-success">Exportar PDF</button>
+                  <button id="ri-cerrar" class="btn btn-secondary">Cerrar</button>
+              </div>
+            </div>
+            <div id="ri-summary" class="mb-2"></div>
+            <!-- Chart area: updates when filters change -->
+            <div class="mb-3">
+              <canvas id="ri-chart" style="max-height:240px; width:100%;"></canvas>
+            </div>
+            <div id="ri-results"></div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- Modal para visualizar reportes (PDF) -->
@@ -205,9 +245,9 @@
           </div>
           <div class="mb-3">
             <label class="form-label">Horarios disponibles</label>
-            <div id="horario-list" class="list-group">
-              <div class="form-text text-muted">-- seleccionar fecha primero --</div>
-            </div>
+            <select id="horario-select" class="form-select" multiple size="6">
+              <option value="" disabled>-- seleccionar fecha primero --</option>
+            </select>
             <div class="form-text">Seleccioná una fecha arriba y luego marcá uno o más horarios para autocompletar inicio/fin.</div>
           </div>
           <div class="mb-3">

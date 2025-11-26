@@ -573,6 +573,118 @@ def api_reporte_reservas_por_canchas_periodo():
             pass
 
 
+@app.route('/reportes/json/reservas/por-canchas', methods=['GET'])
+def api_reporte_reservas_por_canchas_periodo_json():
+    fecha_desde = request.args.get('desde')
+    fecha_hasta = request.args.get('hasta')
+    if not fecha_desde or not fecha_hasta:
+        return jsonify({'error': 'Parámetros required: desde, hasta (YYYY-MM-DD)'}), 400
+    include_details = request.args.get('include_details', '0') == '1'
+    try:
+        from db.connection import get_connection, DEFAULT_DB
+    except Exception as e:
+        return jsonify({'error': 'DB connection error', 'detail': str(e)}), 500
+
+    try:
+        conn = get_connection(DEFAULT_DB)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT ca.id AS cancha_id, tc.nombre AS tipo_nombre, COUNT(r.id) AS reservas_count "
+            "FROM cancha ca LEFT JOIN tipo_cancha tc ON ca.tipo_cancha_id = tc.id "
+            "LEFT JOIN reserva r ON r.cancha_id = ca.id AND r.fecha BETWEEN ? AND ? "
+            "GROUP BY ca.id ORDER BY reservas_count DESC",
+            (fecha_desde, fecha_hasta),
+        )
+        filas = cur.fetchall()
+        out = []
+        for f in filas:
+            item = {'cancha_id': f['cancha_id'], 'tipo_nombre': f['tipo_nombre'] or None, 'reservas_count': int(f['reservas_count'])}
+            if include_details and item['reservas_count'] > 0:
+                cur.execute(
+                    "SELECT r.id, r.fecha, r.cliente_dni, r.precio_final FROM reserva r WHERE r.cancha_id = ? AND r.fecha BETWEEN ? AND ? ORDER BY r.fecha",
+                    (item['cancha_id'], fecha_desde, fecha_hasta)
+                )
+                reservas = []
+                for rr in cur.fetchall():
+                    # fetch horarios for reserva
+                    cur.execute(
+                        "SELECT h.inicio AS inicio, h.fin AS fin FROM horario h JOIN reserva_x_horario rx ON h.id = rx.horario_id WHERE rx.reserva_id = ? ORDER BY h.inicio",
+                        (rr['id'],)
+                    )
+                    horarios = cur.fetchall()
+                    horarios_list = [{'inicio': h['inicio'], 'fin': h['fin']} for h in horarios]
+                    reservas.append({'id': rr['id'], 'fecha': rr['fecha'], 'cliente_dni': rr['cliente_dni'], 'precio': rr['precio_final'], 'horarios': horarios_list})
+                item['reservas'] = reservas
+            out.append(item)
+        return jsonify(out)
+    except Exception as e:
+        return jsonify({'error': 'Error generando reporte JSON', 'detail': str(e)}), 500
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@app.route('/reportes/json/canchas/mas-utilizadas', methods=['GET'])
+def api_reporte_canchas_mas_utilizadas_json():
+    try:
+        limite = int(request.args.get('limite', 10))
+    except Exception:
+        limite = 10
+    try:
+        from db.connection import get_connection, DEFAULT_DB
+        conn = get_connection(DEFAULT_DB)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT ca.id AS cancha_id, tc.nombre AS tipo_nombre, COUNT(r.id) AS reservas_count "
+            "FROM cancha ca LEFT JOIN tipo_cancha tc ON ca.tipo_cancha_id = tc.id "
+            "LEFT JOIN reserva r ON r.cancha_id = ca.id "
+            "GROUP BY ca.id ORDER BY reservas_count DESC LIMIT ?",
+            (limite,)
+        )
+        filas = cur.fetchall()
+        out = [{'cancha_id': f['cancha_id'], 'tipo_nombre': f['tipo_nombre'] or None, 'reservas_count': int(f['reservas_count'])} for f in filas]
+        return jsonify(out)
+    except Exception as e:
+        return jsonify({'error': 'Error generando reporte JSON', 'detail': str(e)}), 500
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@app.route('/reportes/json/utilizacion/<int:anio>', methods=['GET'])
+def api_reporte_utilizacion_mensual_json(anio: int):
+    try:
+        from db.connection import get_connection, DEFAULT_DB
+        conn = get_connection(DEFAULT_DB)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT substr(fecha,1,4) as anio, substr(fecha,6,2) as mes, COUNT(*) as cnt "
+            "FROM reserva WHERE substr(fecha,1,4) = ? GROUP BY mes ORDER BY mes",
+            (str(anio),)
+        )
+        rows = cur.fetchall()
+        counts = [0] * 12
+        for r in rows:
+            try:
+                m = int(r['mes'])
+                if 1 <= m <= 12:
+                    counts[m-1] = int(r['cnt'])
+            except Exception:
+                continue
+        return jsonify({'anio': anio, 'counts': counts})
+    except Exception as e:
+        return jsonify({'error': 'Error generando reporte JSON', 'detail': str(e)}), 500
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 @app.route('/reportes/utilizacion/<int:anio>', methods=['GET'])
 def api_reporte_utilizacion_mensual(anio: int):
     download = request.args.get('download', '0') == '1'

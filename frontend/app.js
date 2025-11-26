@@ -2,6 +2,16 @@ const API_BASE = 'http://127.0.0.1:5000';
 let canchasCache = [];
 
 async function fetchJSON(path, opts) {
+  // Prevent returning cached GET responses: force no-store and append timestamp
+  opts = opts ? Object.assign({}, opts) : {};
+  const method = (opts.method || 'GET').toUpperCase();
+  if (method === 'GET') {
+    opts.cache = 'no-store';
+    // append cache-busting timestamp to URL
+    const ts = '_=' + Date.now();
+    if (path.includes('?')) path = path + '&' + ts;
+    else path = path + '?' + ts;
+  }
   const res = await fetch(API_BASE + path, opts);
   if (!res.ok) {
     const txt = await res.text();
@@ -424,7 +434,7 @@ window.addEventListener('load', () => {
   // navigation buttons
   const show = (id) => {
     // hide all content sections
-    ['main-menu','canchas-section','reserva-section','clientes-section','reservas-section'].forEach(s => {
+    ['main-menu','canchas-section','reserva-section','clientes-section','reservas-section','reportes-section'].forEach(s => {
       const el = document.getElementById(s);
       if (el) el.classList.add('d-none');
     });
@@ -508,20 +518,15 @@ window.addEventListener('load', () => {
   }
   // wire report buttons
   if (btnReporteReservas) btnReporteReservas.addEventListener('click', async () => {
-    const dni = prompt('Ingrese DNI del cliente para el reporte (solo números):');
-    if (!dni) return;
-    const url = `${API_BASE}/reportes/reservas/cliente/${encodeURIComponent(dni)}?download=0`;
-    openReportViewer(`Reservas - Cliente ${dni}`, url);
+    if (window.__renderReservasClientesInteractive) window.__renderReservasClientesInteractive();
   });
   if (btnReporteIngresos) btnReporteIngresos.addEventListener('click', async () => {
-    const url = `${API_BASE}/reportes/canchas/mas-utilizadas?download=0`;
-    openReportViewer('Canchas más utilizadas', url);
+    if (window.__renderCanchasMasUtilizadas) window.__renderCanchasMasUtilizadas();
   });
   if (btnReporteClientes) btnReporteClientes.addEventListener('click', async () => {
     const anio = prompt('Año (YYYY) para el reporte de utilización mensual:');
     if (!anio) return;
-    const url = `${API_BASE}/reportes/utilizacion/${encodeURIComponent(anio)}?download=0`;
-    openReportViewer(`Utilización mensual ${anio}`, url);
+    if (window.__renderUtilizacionMensual) window.__renderUtilizacionMensual(anio);
   });
   // abrir modal de selección de período para el nuevo reporte
   if (btnReportePorCanchas) btnReportePorCanchas.addEventListener('click', (e) => {
@@ -919,6 +924,20 @@ async function crearActualizarReserva(e) {
     try { await populateClientesSelect(); } catch (e) { /* ignore */ }
     listarReservas();
     listarCanchas();
+      // if report panel is visible refresh it so new reservas appear without full reload
+      try {
+        const reportSection = document.getElementById('reportes-section');
+        // Only refresh reports if the user is currently viewing the reports section
+        if (reportSection && !reportSection.classList.contains('d-none')) {
+          if (window.__renderReservasClientesInteractive) {
+            window.__renderReservasClientesInteractive();
+          } else if (window.__renderReservasPorCanchas) {
+            const d = document.getElementById('ri-desde')?.value;
+            const h = document.getElementById('ri-hasta')?.value;
+            if (d && h) window.__renderReservasPorCanchas(d, h);
+          }
+        }
+      } catch (e) { console.error('Error refrescando panel de reportes:', e); }
   } catch (err) {
     console.error('Error guardando reserva:', err);
     alert('Error guardando reserva: ' + err.message);
@@ -970,6 +989,19 @@ async function confirmDeleteReserva() {
     await fetchJSON(`/reservas/${pendingDeleteReservaId}`, { method: 'DELETE' });
     closeDeleteReservaModal();
     listarReservas();
+    // refresh report panel if visible so deletion appears immediately
+    try {
+      const reportSection = document.getElementById('reportes-section');
+      if (reportSection && !reportSection.classList.contains('d-none')) {
+        if (window.__renderReservasClientesInteractive) {
+          window.__renderReservasClientesInteractive();
+        } else if (window.__renderReservasPorCanchas) {
+          const d = document.getElementById('ri-desde')?.value;
+          const h = document.getElementById('ri-hasta')?.value;
+          if (d && h) window.__renderReservasPorCanchas(d, h);
+        }
+      }
+    } catch (e) { console.error('Error refrescando panel de reportes tras eliminar reserva:', e); }
   } catch (err) {
     closeDeleteReservaModal();
     alert('Error eliminando reserva: ' + err.message);
@@ -1060,6 +1092,470 @@ try {
 } catch (e) {
   // ignore in non-browser env
 }
+
+// Render interactive report in-page: reservas por canchas
+try {
+  window.__renderReservasPorCanchas = async function(desde, hasta) {
+    try {
+      // close modal if open
+      const modal = document.getElementById('report-period-modal');
+      if (modal) modal.classList.add('d-none');
+      // show reportes section and interactive panel
+      const showSection = (id) => {
+        ['main-menu','canchas-section','reserva-section','clientes-section','reservas-section','reportes-section'].forEach(s => {
+          const el = document.getElementById(s);
+          if (el) el.classList.add('d-none');
+        });
+        const target = document.getElementById('reportes-section');
+        if (target) target.classList.remove('d-none');
+      };
+      showSection('reportes-section');
+      const panel = document.getElementById('report-interactive');
+      if (!panel) { alert('Panel de reportes no disponible'); return; }
+      panel.classList.remove('d-none');
+      // populate inputs
+      const desdeEl = document.getElementById('ri-desde');
+      const hastaEl = document.getElementById('ri-hasta');
+      // record state for export
+      window.__ri_last_view = { view: 'por-canchas', desde: (desdeEl && desdeEl.value) || desde || null, hasta: (hastaEl && hastaEl.value) || hasta || null };
+      if (desdeEl) desdeEl.value = desde || (new Date(Date.now()-30*24*3600*1000)).toISOString().slice(0,10);
+      if (hastaEl) hastaEl.value = hasta || new Date().toISOString().slice(0,10);
+
+      async function loadAndRender() {
+        const d = document.getElementById('ri-desde').value;
+        const h = document.getElementById('ri-hasta').value;
+        if (!d || !h) { alert('Ambas fechas son requeridas'); return; }
+        const url = `${API_BASE}/reportes/json/reservas/por-canchas?desde=${encodeURIComponent(d)}&hasta=${encodeURIComponent(h)}&include_details=1`;
+        const data = await fetchJSON(url);
+        // update last-view dates in case inputs changed
+        window.__ri_last_view = { view: 'por-canchas', desde: d, hasta: h };
+        // render summary
+        const sumEl = document.getElementById('ri-summary');
+        const total = data.reduce((s,it)=>s+ (it.reservas_count||0),0);
+        sumEl.innerHTML = `<strong>Total reservas en período:</strong> ${total}`;
+        // render results table + bars
+        const resEl = document.getElementById('ri-results');
+        resEl.innerHTML = '';
+        if (!data || data.length===0) { resEl.innerHTML = '<div>No hay datos para el período seleccionado.</div>'; return; }
+        // determine max for bars
+        const max = Math.max(...data.map(it=>it.reservas_count||0),1);
+        const table = document.createElement('div');
+        table.className = 'list-group';
+        data.forEach(it => {
+          const item = document.createElement('div');
+          item.className = 'list-group-item';
+          const header = document.createElement('div');
+          header.className = 'd-flex justify-content-between align-items-center';
+          const left = document.createElement('div');
+          left.innerHTML = `<strong>Cancha ${it.cancha_id}</strong> ${it.tipo_nombre ? ('— '+it.tipo_nombre) : ''}`;
+          const right = document.createElement('div');
+          right.innerHTML = `<span class="badge bg-primary me-2">${it.reservas_count}</span>`;
+          header.appendChild(left);
+          header.appendChild(right);
+          item.appendChild(header);
+          // bar
+          const barWrap = document.createElement('div');
+          barWrap.style.marginTop = '8px';
+          const barBg = document.createElement('div');
+          barBg.style.background = '#eee';
+          barBg.style.height = '12px';
+          barBg.style.position = 'relative';
+          const barInner = document.createElement('div');
+          barInner.style.background = '#4c72b0';
+          barInner.style.height = '100%';
+          barInner.style.width = Math.round((it.reservas_count/max)*100) + '%';
+          barBg.appendChild(barInner);
+          barWrap.appendChild(barBg);
+          item.appendChild(barWrap);
+          // details (reservas list)
+          if (it.reservas && it.reservas.length>0) {
+            const details = document.createElement('div');
+            details.style.marginTop = '8px';
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-sm btn-outline-secondary mb-2';
+            btn.textContent = 'Ver reservas';
+            let open = false;
+            const list = document.createElement('div');
+            list.style.display = 'none';
+            btn.addEventListener('click', () => {
+              open = !open;
+              list.style.display = open ? 'block' : 'none';
+              btn.textContent = open ? 'Ocultar reservas' : 'Ver reservas';
+            });
+            details.appendChild(btn);
+            it.reservas.forEach(r => {
+              const rdiv = document.createElement('div');
+              rdiv.className = 'p-2 mb-1';
+              rdiv.style.borderTop = '1px solid #f0f0f0';
+              const horarios = (r.horarios||[]).map(h=>`${h.inicio}-${h.fin}`).join(', ');
+              rdiv.innerHTML = `<div>#${r.id} — ${r.fecha} — DNI ${r.cliente_dni} — ${horarios} — $${r.precio}</div>`;
+              list.appendChild(rdiv);
+            });
+            details.appendChild(list);
+            item.appendChild(details);
+          }
+          table.appendChild(item);
+        });
+        resEl.appendChild(table);
+        // update chart: canchas vs reservas_count
+        try {
+          const labels = data.map(it => `Cancha ${it.cancha_id}`);
+          const values = data.map(it => it.reservas_count || 0);
+          updateReportChart(labels, values, 'Reservas por cancha');
+        } catch (e) { console.error('Error actualizando gráfico:', e); }
+      }
+
+      // attach filter/close events
+      const filBtn = document.getElementById('ri-filtrar');
+      const closeBtn = document.getElementById('ri-cerrar');
+      const exportBtn = document.getElementById('ri-export');
+      if (filBtn) {
+        filBtn.onclick = loadAndRender;
+      }
+      if (exportBtn) exportBtn.onclick = () => { try { window.__exportReportPdf(); } catch(e){console.error(e);} };
+      if (closeBtn) {
+        closeBtn.onclick = () => { document.getElementById('report-interactive').classList.add('d-none'); document.getElementById('main-menu').classList.remove('d-none'); };
+      }
+
+      // initial load
+      await loadAndRender();
+    } catch (err) {
+      console.error('Error renderizando reporte interactivo:', err);
+      alert('Error al renderizar reporte. Revisá la consola.');
+    }
+  };
+} catch (e) {
+  // ignore
+}
+
+// Chart helper: creates or updates the canvas chart in the interactive panel
+function updateReportChart(labels, values, title) {
+  try {
+    const ctx = document.getElementById('ri-chart');
+    if (!ctx) return;
+    // destroy previous chart if any
+    if (window.__ri_chart) {
+      try { window.__ri_chart.destroy(); } catch (e) { /* ignore */ }
+      window.__ri_chart = null;
+    }
+    const data = {
+      labels: labels,
+      datasets: [{
+        label: title || 'Datos',
+        data: values,
+        backgroundColor: labels.map((_,i) => `rgba(76,114,176,0.8)`),
+        borderColor: labels.map((_,i) => `rgba(76,114,176,1)`),
+        borderWidth: 1
+      }]
+    };
+    window.__ri_chart = new Chart(ctx.getContext('2d'), {
+      type: 'bar',
+      data: data,
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false }, title: { display: !!title, text: title } },
+        scales: { y: { beginAtZero: true, ticks: { precision:0 } } }
+      }
+    });
+  } catch (e) { console.error('updateReportChart error', e); }
+}
+
+// Export current interactive report to PDF and download
+try {
+  window.__exportReportPdf = async function() {
+    try {
+      const state = window.__ri_last_view || {};
+      if (!state.view) return alert('No hay reporte activo para exportar');
+      let url = null;
+      let filename = 'reporte.pdf';
+      if (state.view === 'por-canchas') {
+        const desde = state.desde || document.getElementById('ri-desde')?.value;
+        const hasta = state.hasta || document.getElementById('ri-hasta')?.value;
+        if (!desde || !hasta) return alert('Seleccioná rango Desde/Hasta antes de exportar.');
+        url = `${API_BASE}/reportes/reservas/por-canchas?desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}&download=0`;
+        filename = `reporte_reservas_canchas_${desde}_${hasta}.pdf`;
+      } else if (state.view === 'por-clientes') {
+        const dnis = state.dnis || null;
+        if (!dnis || !Array.isArray(dnis) || dnis.length !== 1) {
+          return alert('La exportación a PDF por cliente sólo está disponible para un cliente a la vez. Seleccioná exactamente un cliente.');
+        }
+        const dni = dnis[0];
+        url = `${API_BASE}/reportes/reservas/cliente/${encodeURIComponent(dni)}?download=0`;
+        filename = `reporte_reservas_cliente_${dni}.pdf`;
+      } else {
+        return alert('Tipo de reporte no soportado para exportar.');
+      }
+
+      // fetch PDF as blob and download
+      const resp = await fetch(url, { method: 'GET', cache: 'no-store' });
+      if (!resp.ok) {
+        const txt = await resp.text();
+        throw new Error(`Error server: ${resp.status} - ${txt}`);
+      }
+      const blob = await resp.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+    } catch (err) {
+      console.error('Error exporting PDF:', err);
+      alert('Error exportando PDF: ' + (err.message || err));
+    }
+  };
+} catch (e) {}
+
+// Interactive renderer for 'Canchas más utilizadas'
+try {
+  window.__renderCanchasMasUtilizadas = async function(limite = 10) {
+    try {
+      // show report section
+      document.getElementById('reportes-section').classList.remove('d-none');
+      document.getElementById('main-menu').classList.add('d-none');
+      const panel = document.getElementById('report-interactive');
+      if (!panel) return alert('Panel de reportes no disponible');
+      panel.classList.remove('d-none');
+      document.getElementById('report-interactive-title').textContent = 'Canchas más utilizadas';
+      // hide date inputs for this view
+      document.getElementById('ri-desde').value = '';
+      document.getElementById('ri-hasta').value = '';
+      const resEl = document.getElementById('ri-results');
+      resEl.innerHTML = 'Cargando...';
+      const data = await fetchJSON(`/reportes/json/canchas/mas-utilizadas?limite=${encodeURIComponent(limite)}`);
+      const max = Math.max(...data.map(it=>it.reservas_count||0),1);
+      const table = document.createElement('div');
+      table.className = 'list-group';
+      data.forEach(it => {
+        const item = document.createElement('div'); item.className='list-group-item';
+        item.innerHTML = `<div class="d-flex justify-content-between"><div><strong>Cancha ${it.cancha_id}</strong> ${it.tipo_nombre? '— '+it.tipo_nombre : ''}</div><div><span class="badge bg-primary">${it.reservas_count}</span></div></div>`;
+        const bar = document.createElement('div'); bar.style.marginTop='8px'; const bg=document.createElement('div'); bg.style.background='#eee'; bg.style.height='12px'; const inner=document.createElement('div'); inner.style.background='#4c72b0'; inner.style.height='100%'; inner.style.width = Math.round((it.reservas_count/max)*100)+'%'; bg.appendChild(inner); bar.appendChild(bg); item.appendChild(bar);
+        table.appendChild(item);
+      });
+      resEl.innerHTML = '';
+      resEl.appendChild(table);
+    } catch (err) { console.error(err); alert('Error cargando ranking'); }
+  };
+} catch (e) {}
+
+// Interactive renderer for reservas por cliente
+try {
+  window.__renderReservasPorCliente = async function(dni) {
+    try {
+      // record state so export knows which cliente to export
+      window.__ri_last_view = { view: 'por-clientes', dnis: dni ? [String(dni)] : null, desde: null, hasta: null };
+      if (!dni) return;
+      document.getElementById('reportes-section').classList.remove('d-none');
+      document.getElementById('main-menu').classList.add('d-none');
+      const panel = document.getElementById('report-interactive');
+      if (!panel) return alert('Panel de reportes no disponible');
+      panel.classList.remove('d-none');
+      document.getElementById('report-interactive-title').textContent = `Reservas - Cliente ${dni}`;
+      const resEl = document.getElementById('ri-results'); resEl.innerHTML = 'Cargando...';
+      const data = await fetchJSON(`/reservas?cliente_dni=${encodeURIComponent(dni)}`);
+      if (!data || data.length === 0) { resEl.innerHTML = '<div>No hay reservas para ese cliente.</div>'; return; }
+      // render list
+      const table = document.createElement('div'); table.className='list-group';
+      data.forEach(r => {
+        const item = document.createElement('div'); item.className='list-group-item';
+        const horarios = (r.horarios||[]).map(h=>`${h.inicio}-${h.fin}`).join(', ');
+        item.innerHTML = `<div>#${r.id} — Cancha ${r.cancha_id||''} — ${r.fecha||''} — ${horarios} — $${r.precio||''}</div>`;
+        table.appendChild(item);
+      });
+      resEl.innerHTML=''; resEl.appendChild(table);
+    } catch (err) { console.error(err); alert('Error cargando reservas del cliente'); }
+  };
+} catch (e) {}
+
+// Interactive renderer that shows reservations grouped by client and provides a client select filter
+try {
+  window.__renderReservasClientesInteractive = async function() {
+    try {
+      // set a baseline last-view so export is available even before filters are applied
+      window.__ri_last_view = { view: 'por-clientes', dnis: null, desde: null, hasta: null };
+      // show report section and panel
+      document.getElementById('reportes-section').classList.remove('d-none');
+      document.getElementById('main-menu').classList.add('d-none');
+      const panel = document.getElementById('report-interactive');
+      if (!panel) return alert('Panel de reportes no disponible');
+      panel.classList.remove('d-none');
+      document.getElementById('report-interactive-title').textContent = 'Reservas por cliente';
+
+      const clienteButton = document.getElementById('ri-cliente-button');
+      const clienteMenu = document.getElementById('ri-cliente-menu');
+      const desdeEl = document.getElementById('ri-desde');
+      const hastaEl = document.getElementById('ri-hasta');
+      const resEl = document.getElementById('ri-results');
+
+      // load clients and reservations in parallel
+      const [clientes, reservas] = await Promise.all([
+        fetchJSON('/clientes'),
+        fetchJSON('/reservas')
+      ]);
+
+      // populate cliente multiselect menu (checkboxes). No selection = all clients
+      if (clienteMenu && clienteButton) {
+        clienteMenu.innerHTML = '';
+        clientes.forEach(c => {
+          const label = document.createElement('label');
+          label.style.display = 'block';
+          label.style.padding = '4px 8px';
+          label.style.cursor = 'pointer';
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.setAttribute('data-dni', c.dni);
+          cb.value = c.dni;
+          cb.addEventListener('change', () => {
+            updateClienteButtonLabel();
+          });
+          label.appendChild(cb);
+          const span = document.createElement('span');
+          span.textContent = ` ${c.nombre || ''} (${c.dni})`;
+          label.appendChild(span);
+          clienteMenu.appendChild(label);
+        });
+        // clicking the button toggles the menu
+        clienteButton.addEventListener('click', (e) => { e.stopPropagation(); clienteMenu.classList.toggle('d-none'); });
+        // close menu when clicking outside
+        document.addEventListener('click', (e) => { if (!clienteMenu.contains(e.target) && e.target !== clienteButton) clienteMenu.classList.add('d-none'); });
+      }
+
+      function updateClienteButtonLabel() {
+        if (!clienteMenu || !clienteButton) return;
+        const checked = Array.from(clienteMenu.querySelectorAll('input[type=checkbox]:checked'));
+        if (checked.length === 0) {
+          clienteButton.textContent = '-- Todos los clientes --';
+        } else if (checked.length === 1) {
+          const txt = checked[0].nextSibling ? checked[0].nextSibling.textContent.trim() : '1 seleccionado';
+          clienteButton.textContent = txt;
+        } else {
+          clienteButton.textContent = `${checked.length} clientes seleccionados`;
+        }
+      }
+
+      // helper to filter by date range using string comparison (YYYY-MM-DD)
+      // avoids timezone/parsing inconsistencies by normalizing to date-only string
+      function inRange(rFecha, desde, hasta) {
+        if (!desde && !hasta) return true;
+        if (!rFecha) return false;
+        // normalize reservation date to YYYY-MM-DD
+        const fechaStr = (typeof rFecha === 'string') ? rFecha.slice(0,10) : (new Date(rFecha)).toISOString().slice(0,10);
+        if (desde && fechaStr < desde) return false;
+        if (hasta && fechaStr > hasta) return false;
+        return true;
+      }
+
+      function renderGrouped(selectedDnis) {
+        const desdeVal = desdeEl?.value || '';
+        const hastaVal = hastaEl?.value || '';
+        // group reservas by cliente dni
+        const map = new Map();
+        reservas.forEach(r => {
+          if (!inRange(r.fecha, desdeVal, hastaVal)) return;
+          const dni = r.cliente_dni || r.cliente_dni;
+          if (!dni) return;
+          // if selectedDnis is null -> show all; else it should be an array of allowed dnis
+          if (Array.isArray(selectedDnis) && selectedDnis.length > 0 && selectedDnis.indexOf(String(dni)) === -1) return;
+          if (!map.has(dni)) map.set(dni, []);
+          map.get(dni).push(r);
+        });
+        resEl.innerHTML = '';
+        if (map.size === 0) { resEl.innerHTML = '<div>No hay reservas en el período para los clientes seleccionados.</div>'; return; }
+        // update chart: clientes vs #reservas
+        try {
+          const labels = Array.from(map.keys()).map(dni => {
+            const c = clientes.find(cc => String(cc.dni) === String(dni));
+            return c ? (c.nombre || (`${dni}`)) : `${dni}`;
+          });
+          const values = Array.from(map.values()).map(rs => rs.length);
+          updateReportChart(labels, values, 'Reservas por cliente');
+        } catch (e) { console.error('Error actualizando gráfico (clientes):', e); }
+        // For each client in map produce a card with their reservations
+        for (const [dni, rs] of map.entries()) {
+          const cliente = clientes.find(c => String(c.dni) === String(dni));
+          const card = document.createElement('div'); card.className = 'card mb-2';
+          const body = document.createElement('div'); body.className = 'card-body';
+          const title = document.createElement('h5'); title.className = 'card-title'; title.textContent = `${cliente ? (cliente.nombre+'') : 'DNI '+dni}`;
+          const subtitle = document.createElement('h6'); subtitle.className = 'card-subtitle mb-2 text-muted'; subtitle.textContent = `DNI: ${dni} — ${rs.length} reservas`; 
+          body.appendChild(title); body.appendChild(subtitle);
+          rs.forEach(r => {
+            const div = document.createElement('div'); div.className = 'mb-1';
+            const horariosLabel = (r.horarios && Array.isArray(r.horarios)) ? r.horarios.map(h => (h.inicio||h.inicio)+'-'+(h.fin||h.fin)).join(', ') : '';
+            div.innerHTML = `<div>#${r.id} — Cancha ${r.cancha_id || ''} — ${r.fecha} — ${horariosLabel} — $${r.precio || ''}</div>`;
+            body.appendChild(div);
+          });
+          card.appendChild(body);
+          resEl.appendChild(card);
+        }
+      }
+
+      // helper to read selected DNIs from checkbox menu: null => none selected -> treat as all
+      function getSelectedDnis() {
+        if (!clienteMenu) return null;
+        const checked = Array.from(clienteMenu.querySelectorAll('input[type=checkbox]:checked')).map(cb => String(cb.getAttribute('data-dni')));
+        return checked.length === 0 ? null : checked;
+      }
+
+      // initial render shows all
+      renderGrouped(null);
+
+      // wire select and filter button
+      const filBtn = document.getElementById('ri-filtrar');
+      const closeBtn = document.getElementById('ri-cerrar');
+      const exportBtn = document.getElementById('ri-export');
+      if (filBtn) filBtn.onclick = () => {
+        const sel = getSelectedDnis();
+        // update state
+        window.__ri_last_view = Object.assign({}, window.__ri_last_view || {}, { view: 'por-clientes', dnis: sel, desde: desdeEl?.value || null, hasta: hastaEl?.value || null });
+        renderGrouped(sel);
+      };
+      if (exportBtn) exportBtn.onclick = () => { try { window.__exportReportPdf(); } catch(e){console.error(e);} };
+      // when checking/unchecking, optionally re-render immediately
+      if (clienteMenu) clienteMenu.addEventListener('change', () => {
+        // update button label
+        updateClienteButtonLabel();
+        // update last-view selection
+        const sel = getSelectedDnis();
+        window.__ri_last_view = Object.assign({}, window.__ri_last_view || {}, { view: 'por-clientes', dnis: sel, desde: desdeEl?.value || null, hasta: hastaEl?.value || null });
+        // only auto render if reports section visible
+        try { if (document.getElementById('reportes-section') && !document.getElementById('reportes-section').classList.contains('d-none')) renderGrouped(sel); } catch (e) {}
+      });
+      if (closeBtn) closeBtn.onclick = () => { panel.classList.add('d-none'); document.getElementById('main-menu').classList.remove('d-none'); };
+
+    } catch (err) { console.error(err); alert('Error cargando reservas por cliente interactivo'); }
+  };
+} catch (e) {}
+
+// Interactive renderer for utilización mensual
+try {
+  window.__renderUtilizacionMensual = async function(anio) {
+    try {
+      if (!anio) { anio = prompt('Año (YYYY):'); if (!anio) return; }
+      document.getElementById('reportes-section').classList.remove('d-none');
+      document.getElementById('main-menu').classList.add('d-none');
+      const panel = document.getElementById('report-interactive');
+      if (!panel) return alert('Panel de reportes no disponible');
+      panel.classList.remove('d-none');
+      document.getElementById('report-interactive-title').textContent = `Utilización mensual ${anio}`;
+      const resEl = document.getElementById('ri-results'); resEl.innerHTML = 'Cargando...';
+      const data = await fetchJSON(`/reportes/json/utilizacion/${encodeURIComponent(anio)}`);
+      const counts = data.counts || [];
+      const months = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+      const max = Math.max(...counts,1);
+      const table = document.createElement('div'); table.className='list-group';
+      counts.forEach((c,i)=>{
+        const item = document.createElement('div'); item.className='list-group-item';
+        item.innerHTML = `<div class="d-flex justify-content-between"><div>${months[i]}</div><div><span class="badge bg-primary">${c}</span></div></div>`;
+        const bar = document.createElement('div'); bar.style.marginTop='8px'; const bg=document.createElement('div'); bg.style.background='#eee'; bg.style.height='12px'; const inner=document.createElement('div'); inner.style.background='#4c72b0'; inner.style.height='100%'; inner.style.width = Math.round((c/max)*100)+'%'; bg.appendChild(inner); bar.appendChild(bg); item.appendChild(bar);
+        table.appendChild(item);
+      });
+      resEl.innerHTML=''; resEl.appendChild(table);
+    } catch (err) { console.error(err); alert('Error cargando utilización mensual'); }
+  };
+} catch (e) {}
 
 // Fallback handler: if the specific report button exists but the main
 // initialization didn't wire it (cache or load ordering issues), attach
