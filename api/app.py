@@ -1,4 +1,5 @@
 from flask import Flask, jsonify, request
+from flask import make_response
 import re
 try:
     from flask_cors import CORS
@@ -7,6 +8,7 @@ except Exception:
 import os, sys
 # ensure project root is on sys.path so imports like `import repositorio` work
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import tempfile
 import repositorio
 
 app = Flask(__name__)
@@ -435,6 +437,135 @@ def api_registrar_pago():
         return jsonify({'error': 'Faltan campos en el body. Se requieren: ' + ','.join(required)}), 400
     pid = repositorio.registrar_pago(payload)
     return jsonify({'pago_id': pid}), 201
+
+
+# --- Reportes endpoints (generan PDFs usando el módulo reportes.py) ---
+@app.route('/reportes/reservas/cliente/<int:dni>', methods=['GET'])
+def api_reporte_reservas_por_cliente(dni: int):
+    download = request.args.get('download', '0') == '1'
+    try:
+        from db.connection import DEFAULT_DB
+        from reportes import reporte_reservas_por_cliente
+    except Exception as e:
+        return jsonify({'error': 'Módulo de reportes no disponible', 'detail': str(e)}), 500
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
+    tmp.close()
+    try:
+        reporte_reservas_por_cliente(DEFAULT_DB, dni, tmp.name)
+        with open(tmp.name, 'rb') as f:
+            data = f.read()
+        resp = make_response(data)
+        resp.headers['Content-Type'] = 'application/pdf'
+        filename = f'reporte_reservas_cliente_{dni}.pdf'
+        if download:
+            resp.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        else:
+            resp.headers['Content-Disposition'] = f'inline; filename="{filename}"'
+        return resp
+    finally:
+        try:
+            os.remove(tmp.name)
+        except Exception:
+            pass
+
+
+@app.route('/reportes/reservas/cancha/<int:cancha_id>', methods=['GET'])
+def api_reporte_reservas_por_cancha(cancha_id: int):
+    fecha_desde = request.args.get('desde')
+    fecha_hasta = request.args.get('hasta')
+    if not fecha_desde or not fecha_hasta:
+        return jsonify({'error': 'Parámetros required: desde, hasta (YYYY-MM-DD)'}), 400
+    download = request.args.get('download', '0') == '1'
+    try:
+        from db.connection import DEFAULT_DB
+        from reportes import reporte_reservas_por_cancha_en_periodo
+    except Exception as e:
+        return jsonify({'error': 'Módulo de reportes no disponible', 'detail': str(e)}), 500
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
+    tmp.close()
+    try:
+        reporte_reservas_por_cancha_en_periodo(DEFAULT_DB, cancha_id, fecha_desde, fecha_hasta, tmp.name)
+        with open(tmp.name, 'rb') as f:
+            data = f.read()
+        resp = make_response(data)
+        resp.headers['Content-Type'] = 'application/pdf'
+        filename = f'reporte_reservas_cancha_{cancha_id}.pdf'
+        if download:
+            resp.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        else:
+            resp.headers['Content-Disposition'] = f'inline; filename="{filename}"'
+        return resp
+    finally:
+        try:
+            os.remove(tmp.name)
+        except Exception:
+            pass
+
+
+@app.route('/reportes/canchas/mas-utilizadas', methods=['GET'])
+def api_reporte_canchas_mas_utilizadas():
+    try:
+        limite = int(request.args.get('limite', 10))
+    except Exception:
+        limite = 10
+    download = request.args.get('download', '0') == '1'
+    try:
+        from db.connection import DEFAULT_DB
+        from reportes import reporte_canchas_mas_utilizadas
+    except Exception as e:
+        return jsonify({'error': 'Módulo de reportes no disponible', 'detail': str(e)}), 500
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
+    tmp.close()
+    try:
+        reporte_canchas_mas_utilizadas(DEFAULT_DB, tmp.name, limite=limite)
+        with open(tmp.name, 'rb') as f:
+            data = f.read()
+        resp = make_response(data)
+        resp.headers['Content-Type'] = 'application/pdf'
+        filename = f'reporte_canchas_mas_utilizadas.pdf'
+        if download:
+            resp.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        else:
+            resp.headers['Content-Disposition'] = f'inline; filename="{filename}"'
+        return resp
+    finally:
+        try:
+            os.remove(tmp.name)
+        except Exception:
+            pass
+
+
+@app.route('/reportes/utilizacion/<int:anio>', methods=['GET'])
+def api_reporte_utilizacion_mensual(anio: int):
+    download = request.args.get('download', '0') == '1'
+    try:
+        from db.connection import DEFAULT_DB
+        from reportes import reporte_utilizacion_mensual
+    except Exception as e:
+        return jsonify({'error': 'Módulo de reportes no disponible', 'detail': str(e)}), 500
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
+    tmp.close()
+    try:
+        reporte_utilizacion_mensual(DEFAULT_DB, anio, tmp.name)
+        with open(tmp.name, 'rb') as f:
+            data = f.read()
+        resp = make_response(data)
+        resp.headers['Content-Type'] = 'application/pdf'
+        filename = f'reporte_utilizacion_{anio}.pdf'
+        if download:
+            resp.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        else:
+            resp.headers['Content-Disposition'] = f'inline; filename="{filename}"'
+        return resp
+    finally:
+        try:
+            os.remove(tmp.name)
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':

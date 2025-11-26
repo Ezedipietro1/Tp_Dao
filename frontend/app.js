@@ -537,7 +537,7 @@ window.addEventListener('load', () => {
   // navigation buttons
   const show = (id) => {
     // hide all content sections
-    ['main-menu','canchas-section','reserva-section','clientes-section','reservas-section'].forEach(s => {
+    ['main-menu','canchas-section','reserva-section','clientes-section','reservas-section','reportes-section'].forEach(s => {
       const el = document.getElementById(s);
       if (el) el.classList.add('d-none');
     });
@@ -569,6 +569,7 @@ window.addEventListener('load', () => {
     }
   });
   document.getElementById('btn-clientes').addEventListener('click', () => { show('clientes-section'); listarClientes(); });
+  document.getElementById('btn-reportes').addEventListener('click', () => { show('reportes-section'); listarReportes(); });
   // canchas UI hooks
   const btnCrear = document.getElementById('btn-crear-cancha');
   if (btnCrear) btnCrear.addEventListener('click', async () => {
@@ -617,6 +618,8 @@ window.addEventListener('load', () => {
   document.querySelectorAll('.btn-back').forEach(b => b.addEventListener('click', () => show('main-menu')));
   // initial view: main menu
   show('main-menu');
+  // inicializar handlers de reportes
+  wireReportViewerHandlers();
   // attach reserva form submit handler once
   const reservaForm = document.getElementById('reserva-form');
   if (reservaForm) reservaForm.addEventListener('submit', crearActualizarReserva);
@@ -1194,6 +1197,153 @@ function computeAndShowPrice() {
 }
 
 // attach compute price listener once (attached earlier during window.load)
+
+// --- Reportes ---
+// ---------- Reportes: listar y ver en modal ----------
+
+async function listarReportes() {
+  const listEl = document.getElementById('reportes-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<p class="text-muted">Selecciona un tipo de reporte para ver los disponibles.</p>';
+
+  // wire botones para mostrar el listado correspondiente
+  const btnReservas = document.getElementById('btn-reporte-reservas');
+  const btnIngresos = document.getElementById('btn-reporte-ingresos');
+  const btnClientes = document.getElementById('btn-reporte-clientes');
+
+  if (btnReservas) {
+    btnReservas.onclick = () => listReportesReservas();
+  }
+  if (btnIngresos) {
+    btnIngresos.onclick = () => listReportesCanchas();
+  }
+  if (btnClientes) {
+    btnClientes.onclick = () => listReportesUtilizacion();
+  }
+}
+
+function makeListGroupItem(title, subtitle, onClick) {
+  const item = document.createElement('div');
+  item.className = 'list-group-item d-flex justify-content-between align-items-start';
+  const left = document.createElement('div');
+  left.innerHTML = `<div><strong>${title}</strong></div><div class="small text-muted">${subtitle || ''}</div>`;
+  const right = document.createElement('div');
+  const btn = document.createElement('button');
+  btn.className = 'btn btn-sm btn-primary';
+  btn.textContent = 'Ver';
+  btn.addEventListener('click', onClick);
+  right.appendChild(btn);
+  item.appendChild(left);
+  item.appendChild(right);
+  return item;
+}
+
+async function listReportesReservas() {
+  const listEl = document.getElementById('reportes-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<div class="text-muted">Cargando clientes...</div>';
+  try {
+    const clientes = await fetchJSON('/clientes');
+    listEl.innerHTML = '';
+    if (!clientes || clientes.length === 0) {
+      listEl.innerHTML = '<p class="text-warning">No hay clientes registrados.</p>';
+      return;
+    }
+    clientes.forEach(c => {
+      const dni = c.dni;
+      const nombre = c.nombre || `DNI ${dni}`;
+      const item = makeListGroupItem(nombre, `DNI: ${dni}`, () => {
+        const url = `${API_BASE}/reportes/reservas/cliente/${encodeURIComponent(dni)}`;
+        viewReport(url, `Reservas - ${nombre}`);
+      });
+      listEl.appendChild(item);
+    });
+  } catch (err) {
+    listEl.innerHTML = `<div class="text-danger">Error obteniendo clientes: ${err.message}</div>`;
+  }
+}
+
+function listReportesCanchas() {
+  const listEl = document.getElementById('reportes-list');
+  if (!listEl) return;
+  listEl.innerHTML = '';
+  // Opciones predefinidas de límite
+  const limites = [5, 10, 20];
+  limites.forEach(n => {
+    const title = `Top ${n} - Canchas más utilizadas`;
+    const item = makeListGroupItem(title, `Ranking de canchas por cantidad de reservas (límite ${n})`, () => {
+      const url = `${API_BASE}/reportes/canchas/mas-utilizadas?limite=${n}`;
+      viewReport(url, title);
+    });
+    listEl.appendChild(item);
+  });
+}
+
+async function listReportesUtilizacion() {
+  const listEl = document.getElementById('reportes-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<div class="text-muted">Cargando años disponibles...</div>';
+  try {
+    const reservas = await fetchJSON('/reservas');
+    const yearsSet = new Set();
+    (reservas || []).forEach(r => {
+      if (r && r.fecha) {
+        const y = ('' + r.fecha).slice(0,4);
+        if (/^\d{4}$/.test(y)) yearsSet.add(Number(y));
+      }
+    });
+    const years = Array.from(yearsSet).sort((a,b) => b - a);
+    if (years.length === 0) {
+      // si no hay reservas, mostrar el año actual como opción
+      years.push(new Date().getFullYear());
+    }
+    listEl.innerHTML = '';
+    years.forEach(y => {
+      const title = `Utilización mensual - ${y}`;
+      const item = makeListGroupItem(title, `Ver utilización mensual del año ${y}`, () => {
+        const url = `${API_BASE}/reportes/utilizacion/${y}`;
+        viewReport(url, title);
+      });
+      listEl.appendChild(item);
+    });
+  } catch (err) {
+    listEl.innerHTML = `<div class="text-danger">Error cargando reservas: ${err.message}</div>`;
+  }
+}
+
+function viewReport(url, title) {
+  try {
+    const modal = document.getElementById('report-viewer-modal');
+    const iframe = document.getElementById('report-viewer-iframe');
+    const titleEl = document.getElementById('report-viewer-title');
+    const dl = document.getElementById('report-viewer-download');
+    if (!modal || !iframe || !titleEl || !dl) return;
+    titleEl.textContent = title || 'Reporte';
+    // set iframe src (inline view) and download link
+    iframe.src = url; // server returns PDF inline
+    // build download url (add download=1)
+    const downloadUrl = url + (url.includes('?') ? '&' : '?') + 'download=1';
+    dl.href = downloadUrl;
+    modal.classList.remove('d-none');
+  } catch (e) {
+    alert('No se pudo abrir el reporte: ' + (e.message || e));
+  }
+}
+
+function closeReportViewer() {
+  const modal = document.getElementById('report-viewer-modal');
+  const iframe = document.getElementById('report-viewer-iframe');
+  if (modal) modal.classList.add('d-none');
+  if (iframe) iframe.src = '';
+}
+
+// wire close/backdrop handlers (call this during initialization)
+function wireReportViewerHandlers() {
+  const closeBtn = document.getElementById('report-viewer-close');
+  const backdrop = document.getElementById('report-viewer-backdrop');
+  if (closeBtn) closeBtn.addEventListener('click', closeReportViewer);
+  if (backdrop) backdrop.addEventListener('click', closeReportViewer);
+}
 
 // expose helpers to global scope for debugging and inline onclick usage
 try {
