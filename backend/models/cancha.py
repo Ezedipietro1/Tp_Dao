@@ -1,5 +1,5 @@
-from entidades.tipo_cancha import TipoCancha
-from entidades.servicio import Servicio
+from .tipo_cancha import TipoCancha
+from .servicio import Servicio
 
 
 class Cancha:

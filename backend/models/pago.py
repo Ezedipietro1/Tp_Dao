@@ -1,8 +1,8 @@
 
 from datetime import date
-from entidades.reserva import Reserva
-from entidades.metodo_pago import MetodoPago
-from entidades.estado import Estado
+from .reserva import Reserva
+from .metodo_pago import MetodoPago
+from .estado import Estado
 
 
 class Pago:

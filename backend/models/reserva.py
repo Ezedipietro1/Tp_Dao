@@ -1,9 +1,9 @@
 from datetime import date
 from typing import Optional
-from entidades.cliente import Cliente
-from entidades.cancha import Cancha
-from entidades.horario import Horario
-from entidades.torneo import Torneo
+from .cliente import Cliente
+from .cancha import Cancha
+from .horario import Horario
+from .torneo import Torneo
 
 
 class Reserva:

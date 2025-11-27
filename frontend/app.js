@@ -441,7 +441,8 @@ window.addEventListener('load', () => {
     const target = document.getElementById(id);
     if (target) target.classList.remove('d-none');
   };
-  document.getElementById('btn-canchas').addEventListener('click', () => { show('canchas-section'); listarCanchas(); });
+  const btnCanchas = document.getElementById('btn-canchas');
+  if (btnCanchas) btnCanchas.addEventListener('click', () => { show('canchas-section'); listarCanchas(); });
   const btnCrearReserva = document.getElementById('btn-crear-reserva');
   if (btnCrearReserva) btnCrearReserva.addEventListener('click', () => {
     // open reservation modal for creating a new reserva
@@ -454,7 +455,8 @@ window.addEventListener('load', () => {
     // load clients list into the select
     try { populateClientesSelect(); } catch (e) { console.error('Error cargando clientes para crear reserva', e); }
   });
-  document.getElementById('btn-clientes').addEventListener('click', () => { show('clientes-section'); listarClientes(); });
+  const btnClientes = document.getElementById('btn-clientes');
+  if (btnClientes) btnClientes.addEventListener('click', () => { show('clientes-section'); listarClientes(); });
   // canchas UI hooks
   const btnCrear = document.getElementById('btn-crear-cancha');
   if (btnCrear) btnCrear.addEventListener('click', async () => {
@@ -502,6 +504,126 @@ window.addEventListener('load', () => {
   // reportes view
   const btnReportes = document.getElementById('btn-reportes');
   if (btnReportes) btnReportes.addEventListener('click', () => { show('reportes-section'); });
+  // Navbar link wiring: if nav links exist, call the same handlers as buttons
+  const navMap = [
+    {nav: 'nav-home', target: 'main-menu'},
+    {nav: 'nav-canchas', target: 'canchas-section'},
+    {nav: 'nav-reservas', target: 'reservas-section'},
+    {nav: 'nav-clientes', target: 'clientes-section'},
+    {nav: 'nav-reportes', target: 'reportes-section'}
+  ];
+  navMap.forEach(m => {
+    const el = document.getElementById(m.nav);
+    if (!el) return;
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      try {
+        // If user clicked Inicio, close overlay and show main menu
+        if (m.target === 'main-menu') {
+          // If overlay is open, navigate back so popstate restores UI; otherwise just show main menu
+          if (pageOverlay && !pageOverlay.classList.contains('d-none')) {
+            try { history.back(); } catch (e) { /* ignore */ }
+          } else {
+            try { closePageOverlay(); } catch (e) { /* ignore */ }
+            ['main-menu','canchas-section','reserva-section','clientes-section','reservas-section','reportes-section'].forEach(s => { const se = document.getElementById(s); if (se) se.classList.add('d-none'); });
+            const t = document.getElementById('main-menu'); if (t) t.classList.remove('d-none');
+          }
+        } else {
+          // open the selected section as a standalone page in the overlay
+          openSectionInPage(m.target);
+        }
+        try { const bsCollapse = document.querySelector('.navbar-collapse'); if (bsCollapse && bsCollapse.classList.contains('show')) bsCollapse.classList.remove('show'); } catch(e){}
+      } catch (err) { console.error('Nav click error', err); }
+    });
+  });
+
+  // Page overlay helpers: move section into overlay and restore on close
+  const pageOverlay = document.getElementById('page-overlay');
+  const pageInnerBody = document.querySelector('#page-overlay .page-inner-body');
+  window._movedSections = window._movedSections || {};
+
+  function openSectionInPage(sectionId) {
+    const sec = document.getElementById(sectionId);
+    if (!sec) return;
+    // store original parent/nextSibling to restore later
+    if (!window._movedSections[sectionId]) {
+      window._movedSections[sectionId] = { parent: sec.parentNode, nextSibling: sec.nextSibling, wasHidden: sec.classList.contains('d-none') };
+    }
+    // hide all main sections before showing the overlay
+    ['main-menu','canchas-section','reserva-section','clientes-section','reservas-section','reportes-section'].forEach(s => { const se = document.getElementById(s); if (se) se.classList.add('d-none'); });
+    // move the real section node into the overlay body
+    pageInnerBody.innerHTML = '';
+    // ensure it's visible inside the overlay
+    sec.classList.remove('d-none');
+    pageInnerBody.appendChild(sec);
+    pageOverlay.classList.remove('d-none');
+    // mark body so we can hide the rest of the app and make overlay exclusive
+    document.body.classList.add('overlay-open');
+    document.body.style.overflow = 'hidden';
+    // push history state so the overlay behaves like a separate page
+    try {
+      const hash = '#' + sectionId;
+      // Only push if current hash is different to avoid duplicate history entries
+      if (location.hash !== hash) {
+        history.pushState({ overlay: sectionId }, '', hash);
+      } else {
+        // replace state if same hash but no state
+        if (!history.state || history.state.overlay !== sectionId) history.replaceState({ overlay: sectionId }, '', hash);
+      }
+    } catch (e) {
+      // ignore history errors (e.g. restrictive envs)
+    }
+  }
+
+  function closePageOverlay() {
+    // find moved section inside overlay and restore
+    Object.keys(window._movedSections).forEach(id => {
+      const info = window._movedSections[id];
+      const node = document.getElementById(id);
+      if (node && info && info.parent) {
+        // restore to original position
+        if (info.nextSibling) info.parent.insertBefore(node, info.nextSibling);
+        else info.parent.appendChild(node);
+        // restore hidden state if it was hidden originally
+        if (info.wasHidden) node.classList.add('d-none');
+        delete window._movedSections[id];
+      }
+    });
+    pageInnerBody.innerHTML = '';
+    pageOverlay.classList.add('d-none');
+    document.body.classList.remove('overlay-open');
+    document.body.style.overflow = '';
+    // If URL still references the overlay, navigate back so browser history is consistent
+    try {
+      // if the current history state indicates an overlay, go back one step
+      if (history.state && history.state.overlay) {
+        history.back();
+      } else if (location.hash && location.hash.length > 0) {
+        // fallback: clear hash
+        history.replaceState(null, '', location.pathname + location.search);
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  // Closing overlay is handled only by clicking the logo or 'Inicio' in navbar (handled below).
+
+  // When clicking the navbar brand (logo), act like 'Inicio' and restore main menu
+  const navbarBrand = document.querySelector('.navbar-brand');
+  if (navbarBrand) {
+    navbarBrand.addEventListener('click', (e) => {
+      e.preventDefault();
+      try {
+        // if overlay open, trigger back navigation so popstate handler restores UI
+        if (pageOverlay && !pageOverlay.classList.contains('d-none')) {
+          history.back();
+        } else {
+          // otherwise just show main menu
+          ['main-menu','canchas-section','reserva-section','clientes-section','reservas-section','reportes-section'].forEach(s => { const se = document.getElementById(s); if (se) se.classList.add('d-none'); });
+          const t = document.getElementById('main-menu'); if (t) t.classList.remove('d-none');
+        }
+      } catch (err) { console.error('Error closing overlay from logo', err); }
+    });
+  }
   const btnReporteReservas = document.getElementById('btn-reporte-reservas');
   const btnReporteIngresos = document.getElementById('btn-reporte-ingresos');
   const btnReporteClientes = document.getElementById('btn-reporte-clientes');
@@ -581,6 +703,32 @@ window.addEventListener('load', () => {
   document.querySelectorAll('.btn-back').forEach(b => b.addEventListener('click', () => show('main-menu')));
   // initial view: main menu
   show('main-menu');
+  // Handle back/forward and initial hash: treat overlay sections as separate pages
+  try {
+    window.addEventListener('popstate', (ev) => {
+      const st = ev.state;
+      if (st && st.overlay) {
+        // open the overlay for the requested section
+        try { openSectionInPage(st.overlay); } catch (e) { /* ignore */ }
+      } else {
+        // no overlay state -> ensure overlay closed and show main menu
+        try { closePageOverlay(); } catch (e) { /* ignore */ }
+        ['main-menu','canchas-section','reserva-section','clientes-section','reservas-section','reportes-section'].forEach(s => { const se = document.getElementById(s); if (se) se.classList.add('d-none'); });
+        const t = document.getElementById('main-menu'); if (t) t.classList.remove('d-none');
+      }
+    });
+
+    // If page loaded with a hash, open the corresponding section in overlay
+    if (location.hash && location.hash.length > 1) {
+      const id = location.hash.slice(1);
+      const el = document.getElementById(id);
+      if (el) {
+        // replace state to reflect that the initial entry corresponds to this overlay
+        history.replaceState({ overlay: id }, '', location.hash);
+        try { openSectionInPage(id); } catch (e) { /* ignore */ }
+      }
+    }
+  } catch (e) { /* ignore environments without history support */ }
   // Event delegation fallback for reservas list (handles Edit/Delete clicks reliably)
   const reservasList = document.getElementById('reservas-list');
   if (reservasList) {

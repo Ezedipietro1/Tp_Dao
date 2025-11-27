@@ -2,13 +2,13 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 from db.connection import fetchall, fetchone, execute
-from entidades.cancha import Cancha
-from entidades.reserva import Reserva
-from entidades.servicio import Servicio
-from entidades.cliente import Cliente
-from entidades.horario import Horario
-from entidades.tipo_cancha import TipoCancha
-from Repositorios.ClientesRepo import *
+from backend.models.cancha import Cancha
+from backend.models.reserva import Reserva
+from backend.models.servicio import Servicio
+from backend.models.cliente import Cliente
+from backend.models.horario import Horario
+from backend.models.tipo_cancha import TipoCancha
+from .ClientesRepo import *
 
 
 def _row_to_reserva(row: Dict[str, Any]) -> Reserva:

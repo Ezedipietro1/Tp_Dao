@@ -1,7 +1,7 @@
 from typing import Dict, Any, List, Optional
 from db.connection import fetchall, fetchone, execute
-from entidades.cancha import Cancha
-from entidades.tipo_cancha import TipoCancha
+from backend.models.cancha import Cancha
+from backend.models.tipo_cancha import TipoCancha
 
 
 def _row_to_cancha(row: Dict[str, Any]) -> Cancha:

@@ -5,11 +5,11 @@ This keeps the existing public API while moving implementation into
 `Repositorios/ClientesRepo.py` as requested.
 """
 
-from Repositorios.CanchasRepo import listar_canchas, obtener_cancha, crear_cancha, actualizar_cancha, eliminar_cancha, buscar_canchas, listar_servicios
-from Repositorios.CanchasRepo import listar_tipos, contar_reservas
-from Repositorios.ClientesRepo import get_cliente_por_dni, crear_cliente, listar_clientes
-from Repositorios.ClientesRepo import actualizar_cliente, eliminar_cliente
-from Repositorios.ReservasRepo import (
+from .CanchasRepo import listar_canchas, obtener_cancha, crear_cancha, actualizar_cancha, eliminar_cancha, buscar_canchas, listar_servicios
+from .CanchasRepo import listar_tipos, contar_reservas
+from .ClientesRepo import get_cliente_por_dni, crear_cliente, listar_clientes
+from .ClientesRepo import actualizar_cliente, eliminar_cliente
+from .ReservasRepo import (
     _row_to_reserva,
     crear_reserva,
     crear_reserva_por_dni,
