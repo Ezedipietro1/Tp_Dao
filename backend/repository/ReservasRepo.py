@@ -288,7 +288,7 @@ def cancelar_reserva(reserva_id: int) -> None:
 
 
 def obtener_reserva(reserva_id: int) -> Optional[Reserva]:
-    q = ("SELECT r.*, ch.id AS cancha_id, ch.precio_final AS precio_final, tc.nombre AS cancha_tipo, "
+    q = ("SELECT r.*, ch.id AS cancha_id, tc.nombre AS cancha_tipo, "
          "cl.dni AS cliente_dni, cl.nombre AS cliente_nombre, cl.telefono AS cliente_telefono "
          "FROM reserva r JOIN cancha ch ON r.cancha_id = ch.id LEFT JOIN tipo_cancha tc ON ch.tipo_cancha_id = tc.id JOIN cliente cl ON r.cliente_dni = cl.dni WHERE r.id = ?")
     row = fetchone(q, (reserva_id,))
@@ -438,7 +438,8 @@ def actualizar_reserva(reserva_id: int, reserva: Dict[str, Any]) -> int:
 
 
 def listar_reservas(cancha_id: Optional[int] = None) -> List[Reserva]:
-    base = ("SELECT r.*, ch.id AS cancha_id, ch.precio_final AS precio_final, tc.nombre AS cancha_tipo, "
+    # Note: avoid selecting cancha.current precio_final to preserve the reservation's stored precio_final
+    base = ("SELECT r.*, ch.id AS cancha_id, tc.nombre AS cancha_tipo, "
             "cl.dni AS cliente_dni, cl.nombre AS cliente_nombre, cl.telefono AS cliente_telefono "
             "FROM reserva r JOIN cancha ch ON r.cancha_id = ch.id LEFT JOIN tipo_cancha tc ON ch.tipo_cancha_id = tc.id JOIN cliente cl ON r.cliente_dni = cl.dni")
     if cancha_id:

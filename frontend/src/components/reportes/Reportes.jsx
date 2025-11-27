@@ -214,8 +214,9 @@
 								</div>
 								<div className="col-md-4 d-flex gap-2">
 									<button id="ri-filtrar" className="btn btn-primary" onClick={applyFilterClientes}>Filtrar</button>
-									<button id="ri-export" className="btn btn-success" onClick={exportPdf}>Exportar PDF</button>
-									<button id="ri-cerrar" className="btn btn-secondary" onClick={clearResults}>Cerrar</button>
+									{mode === 'por-clientes' && (
+										<button id="ri-export" className="btn btn-success" onClick={exportPdf}>Exportar PDF</button>
+									)}
 								</div>
 							</div>
 							<div className="mb-3 mt-3" style={{height:260}}>

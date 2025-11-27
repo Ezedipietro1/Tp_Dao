@@ -1,4 +1,5 @@
 from typing import Dict, Any, List, Optional
+from datetime import date, datetime
 from db.connection import fetchall, fetchone, execute
 from backend.models.cancha import Cancha
 from backend.models.tipo_cancha import TipoCancha
@@ -116,10 +117,9 @@ def actualizar_cancha(cancha_id: int, data: Dict[str, Any]) -> int:
     """
     tipo_id = data.get('tipo_cancha_id')
     servicio_ids = data.get('servicio_ids')
-    # prevent updates if there are reservas for this cancha
-    reserva_count_row = fetchone("SELECT COUNT(1) AS cnt FROM reserva WHERE cancha_id = ?", (cancha_id,))
-    if reserva_count_row and reserva_count_row.get('cnt') and int(reserva_count_row.get('cnt')) > 0:
-        raise ValueError('No se puede modificar la cancha: existen reservas asociadas.')
+    # prevent updates if there are upcoming or in-progress reservas for this cancha
+    if _tiene_reservas_activas(cancha_id):
+        raise ValueError('No se puede modificar la cancha: existen reservas futuras o en curso.')
     # if tipo not provided, read current
     if not tipo_id:
         row = fetchone("SELECT tipo_cancha_id FROM cancha WHERE id = ?", (cancha_id,))
@@ -149,10 +149,9 @@ def actualizar_cancha(cancha_id: int, data: Dict[str, Any]) -> int:
 
 def eliminar_cancha(cancha_id: int) -> None:
     """Eliminar cancha y sus relaciones con servicios."""
-    # Do not allow deletion if there are reservas for this cancha
-    reserva_count_row = fetchone("SELECT COUNT(1) AS cnt FROM reserva WHERE cancha_id = ?", (cancha_id,))
-    if reserva_count_row and reserva_count_row.get('cnt') and int(reserva_count_row.get('cnt')) > 0:
-        raise ValueError('No se puede eliminar la cancha: existen reservas asociadas.')
+    # Do not allow deletion if there are upcoming or in-progress reservas for this cancha
+    if _tiene_reservas_activas(cancha_id):
+        raise ValueError('No se puede eliminar la cancha: existen reservas futuras o en curso.')
 
     # remove links to servicios
     execute("DELETE FROM cancha_x_servicio WHERE cancha_id = ?", (cancha_id,))
@@ -204,3 +203,61 @@ def contar_reservas(cancha_id: int) -> int:
         return int(row.get('cnt')) if row and row.get('cnt') is not None else 0
     except Exception:
         return 0
+
+
+def _tiene_reservas_activas(cancha_id: int) -> bool:
+    """Retorna True si la cancha tiene reservas futuras o en curso (no finalizadas)."""
+    try:
+        today = date.today()
+        today_iso = today.isoformat()
+        rows = fetchall("SELECT id, fecha FROM reserva WHERE cancha_id = ? AND fecha >= ? ORDER BY fecha", (cancha_id, today_iso)) or []
+        for r in rows:
+            fecha_raw = r.get('fecha')
+            try:
+                fecha_dt = datetime.fromisoformat(fecha_raw).date() if isinstance(fecha_raw, str) else fecha_raw
+            except Exception:
+                fecha_dt = None
+            if fecha_dt is None:
+                # conservative: if we can't parse, assume active
+                return True
+            if fecha_dt > today:
+                return True
+            if fecha_dt == today:
+                # check horarios for this reserva: if any horario finishes after current time, consider active
+                hrs = fetchall("SELECT h.inicio, h.fin FROM horario h JOIN reserva_x_horario rx ON h.id = rx.horario_id WHERE rx.reserva_id = ?", (r.get('id'),)) or []
+                max_fin_min = None
+                earliest_start_min = None
+                for h in hrs:
+                    inicio = h.get('inicio')
+                    fin = h.get('fin')
+                    if inicio and fin:
+                        try:
+                            parts_i = str(inicio).split(':')
+                            parts_f = str(fin).split(':')
+                            ih = int(parts_i[0]); im = int(parts_i[1]) if len(parts_i)>1 else 0
+                            fh = int(parts_f[0]); fm = int(parts_f[1]) if len(parts_f)>1 else 0
+                        except Exception:
+                            continue
+                        start_min = ih*60 + im
+                        end_min = fh*60 + fm
+                        if end_min <= start_min:
+                            end_min += 24*60
+                        if earliest_start_min is None or start_min < earliest_start_min:
+                            earliest_start_min = start_min
+                        if max_fin_min is None or end_min > max_fin_min:
+                            max_fin_min = end_min
+                if max_fin_min is None:
+                    # no horarios found, consider active (conservative)
+                    return True
+                now = datetime.now()
+                now_min = now.hour*60 + now.minute
+                now_comp = now_min
+                if max_fin_min > 24*60 and earliest_start_min is not None and now_min < earliest_start_min:
+                    now_comp = now_min + 24*60
+                # if current time is before or equal to max_fin_min then reservation is still active
+                if now_comp <= max_fin_min:
+                    return True
+        return False
+    except Exception:
+        # on error be conservative and say there are active reservations
+        return True

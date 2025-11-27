@@ -30,7 +30,8 @@ def api_listar_canchas():
                 if isinstance(c, dict):
                     try:
                         cid = c.get('id')
-                        c['has_reservas'] = bool(repositorio.contar_reservas(cid)) if cid is not None else False
+                        # has_reservas now indicates there are active/future reservations
+                        c['has_reservas'] = bool(repositorio._tiene_reservas_activas(cid)) if cid is not None else False
                     except Exception:
                         pass
                     return c
@@ -40,7 +41,8 @@ def api_listar_canchas():
                     'precio_por_hora': c.get_precio() if hasattr(c, 'get_precio') else getattr(c, 'precio_por_hora', None),
                     'tipo_cancha_id': c.get_tipo_id() if hasattr(c, 'get_tipo_id') else getattr(c, 'tipo_cancha_id', None),
                     'estado_id': c.get_estado_id() if hasattr(c, 'get_estado_id') else getattr(c, 'estado_id', None),
-                    'has_reservas': bool(repositorio.contar_reservas(c.get_id() if hasattr(c, 'get_id') else getattr(c, 'id', None)))
+                    # has_reservas now indicates there are active/future reservations
+                    'has_reservas': bool(repositorio._tiene_reservas_activas(c.get_id() if hasattr(c, 'get_id') else getattr(c, 'id', None)))
                 }
             except Exception:
                 return {}
@@ -126,3 +128,18 @@ def api_listar_servicios():
         return jsonify(data)
     except Exception as e:
         return jsonify({'error': 'Error al listar servicios', 'detail': str(e)}), 500
+
+
+@canchas_bp.route('/canchas/<int:cancha_id>/reservas-actives', methods=['GET'])
+def api_reservas_activas_debug(cancha_id):
+    """Ruta temporal de depuración: devuelve si la cancha tiene reservas activas y lista las reservas asociadas."""
+    try:
+        tiene_activas = bool(repositorio._tiene_reservas_activas(cancha_id))
+        # listar_reservas devuelve objetos/estructuras de reserva
+        try:
+            reservas = repositorio.listar_reservas(cancha_id)
+        except Exception:
+            reservas = []
+        return jsonify({'cancha_id': cancha_id, 'tiene_activas': tiene_activas, 'reservas': reservas})
+    except Exception as e:
+        return jsonify({'error': 'Error revisando reservas activas', 'detail': str(e)}), 500

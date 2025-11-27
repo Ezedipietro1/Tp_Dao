@@ -9,6 +9,7 @@ import { Reportes } from "./components/reportes/Reportes";
 import { Reservas } from "./components/reservas/Reservas";
 import { Clientes } from "./components/clientes/Clientes";
 import { Footer } from "./components/Footer";
+import { Torneos } from "./components/torneos/Torneos";
 
 
 function App() {
@@ -19,14 +20,15 @@ function App() {
         <Menu />
         <div className="divBody">
           <Routes>
-            <Route path="/inicio" element={<Inicio />} />{" "}
+            <Route path="/inicio" element={<Inicio />} />
             {/* en path ponemos la url y en element el componente que llamamos en esa url */}
-            {/* si no encuentra la ruta en las opciones de arriba, redirige a inicio por defecto */}
-            <Route path="*" element={<Navigate to="/inicio" replace />} />{" "}
             <Route path="/clientes" element={<Clientes />} />
             <Route path="/canchas" element={<Canchas />} />
             <Route path="/reportes" element={<Reportes />} />
             <Route path="/reservas" element={<Reservas />} />
+            <Route path="/torneos" element={<Torneos />} />
+            {/* si no encuentra la ruta en las opciones de arriba, redirige a inicio por defecto */}
+            <Route path="*" element={<Navigate to="/inicio" replace />} />
           </Routes>
         </div>
         <Footer />

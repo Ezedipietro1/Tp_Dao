@@ -7,7 +7,7 @@ from .torneo import Torneo
 
 
 class Reserva:
-    def __init__(self, id: int, cliente: Cliente, cancha: Cancha, horarios: list[Horario], fecha: date, torneo: Optional[Torneo] = None):
+    def __init__(self, id: int, cliente: Cliente, cancha: Cancha, horarios: list[Horario], fecha: date, torneo: Optional[Torneo] = None, activa: bool = True):
         self._id = id
         self._cliente = cliente
         self._cancha = cancha
@@ -15,6 +15,7 @@ class Reserva:
         self._fecha = fecha
         self._precio_final = self.calcular_precio_final()
         self._torneo = torneo
+        self._activa = True  # Nueva propiedad para indicar si la reserva está activa
 
     def get_id(self) -> Optional[int]:
         return self._id

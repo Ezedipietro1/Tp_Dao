@@ -6,7 +6,7 @@ This keeps the existing public API while moving implementation into
 """
 
 from .CanchasRepo import listar_canchas, obtener_cancha, crear_cancha, actualizar_cancha, eliminar_cancha, buscar_canchas, listar_servicios
-from .CanchasRepo import listar_tipos, contar_reservas
+from .CanchasRepo import listar_tipos, contar_reservas, _tiene_reservas_activas
 from .ClientesRepo import get_cliente_por_dni, crear_cliente, listar_clientes
 from .ClientesRepo import actualizar_cliente, eliminar_cliente
 from .ReservasRepo import (
@@ -23,6 +23,7 @@ from .ReservasRepo import (
     calcular_ingresos,
     registrar_pago,
 )
+from .TorneosRepo import listar_torneos, obtener_torneo, crear_torneo, actualizar_torneo, eliminar_torneo
 
 __all__ = [
     'listar_canchas', 'obtener_cancha',
@@ -30,7 +31,9 @@ __all__ = [
     'listar_servicios',
     'listar_tipos',
     'contar_reservas',
+    '_tiene_reservas_activas',
     'get_cliente_por_dni', 'crear_cliente', 'listar_clientes',
     'actualizar_cliente', 'eliminar_cliente',
     'crear_reserva', 'crear_reserva_por_dni', 'verificar_disponibilidad', 'verificar_disponibilidad_por_horario', 'cancelar_reserva', 'obtener_reserva', 'actualizar_reserva', 'listar_reservas', 'listar_horarios', 'calcular_ingresos', 'registrar_pago'
+    , 'listar_torneos', 'obtener_torneo', 'crear_torneo', 'actualizar_torneo', 'eliminar_torneo'
 ]

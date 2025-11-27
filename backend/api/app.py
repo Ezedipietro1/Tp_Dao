@@ -33,6 +33,7 @@ from ..routes.clientes import clientes_bp
 from ..routes.reservas import reservas_bp
 from ..routes.pagos import pagos_bp
 from ..routes.reportes import reportes_bp
+from ..routes.torneos import torneos_bp
 
 # Registrar blueprint de canchas (separación de rutas)
 app.register_blueprint(canchas_bp)
@@ -42,6 +43,7 @@ app.register_blueprint(clientes_bp)
 app.register_blueprint(reservas_bp)
 app.register_blueprint(pagos_bp)
 app.register_blueprint(reportes_bp)
+app.register_blueprint(torneos_bp)
 
 
 
