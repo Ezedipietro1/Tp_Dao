@@ -1,5 +1,9 @@
 body {
-  background-color: rgb(241, 243, 247);
+  background-color: rgba(250, 250, 250, 0.836);
+}
+
+.navbar.navbar-dark.navbar-expand-md {
+  background-color: #315a33;
 }
 
 .inicio {
@@ -13,9 +17,13 @@ body {
 }
 
 .divBody {
-  background-color: white;
+  background-color: rgb(213 213 213 / 49%);
   min-height: 75vh;
   padding: 1rem;
+}
+
+.btn.btn-outline-info {
+  color: black;
 }
 
 /* pie de la pagina */
@@ -28,15 +36,12 @@ footer {
 }
 
 .tituloPagina {
-  font-size: 1.75rem;
-  font-weight: 500;
-  color: white;
-  text-shadow: 1px 1px 2px black, 0 0 25px blue, 0 0 5px darkblue;
-  border-bottom-style: solid;
-  border-color: gray;
-  border-bottom-width: thin;
-  padding-bottom: 0.1em;
-  margin-bottom: 0.5em;
+  font-size: 2rem;
+  color: #000000c9;
+  text-shadow: none;
+  border-bottom: none;
+  padding: 1rem;
+  font-weight: 700;
 }
 
 /* Overrides for the Reportes page: labels there are simple and shouldn't use the global fancy label style */
@@ -51,9 +56,12 @@ footer {
 }
 
 .reportes-page .tituloPagina {
-  color: #0b5ed7; /* blue title on white background */
+  font-size: 2rem;
+  color: #000000c9;
   text-shadow: none;
   border-bottom: none;
+  padding: 1rem;
+  font-weight: 700;
 }
 
 .reportes-page .card {
@@ -186,4 +194,52 @@ thead {
 .imagenes {
   width: 100%;
   opacity: 0.3;
+}
+
+/* Styles for Inicio component: schedule and map */
+.section-block { background: #fff; padding: 1rem; border-radius: 8px; box-shadow: 0 8px 20px rgba(15,23,42,0.06); margin-bottom: 1rem; }
+.hero { display:flex; align-items:center; gap: 1rem; background: linear-gradient(180deg,#fff,#f3f8ff); padding: 1rem; border-radius: 8px; box-shadow: 0 6px 18px rgba(20,30,50,0.04); }
+.logo-wrap img { display:block; }
+.schedule-table th, .schedule-table td { padding: 6px 8px; border-top: 1px solid rgba(15,23,42,0.06); font-size: 0.95rem; }
+.schedule-table th { font-weight: 600; text-align: center; }
+.schedule-table td.available { background: rgba(16,185,129,0.06); color: #065f46; }
+.schedule-table td.booked { background: rgba(249,115,22,0.06); color: #7c2d12; }
+.map-container iframe { width: 100%; height: 100%; display:block; border:0; }
+
+@media (max-width: 900px) {
+  .hero { flex-direction: column; align-items: flex-start; }
+}
+
+/* Subtitle emphasis used in Inicio component */
+.subtitle {
+  font-size: 1.25rem; /* larger than lead */
+  font-weight: 600;
+  color: #000000; /* user requested: black */
+  margin-top: 0.125rem;
+}
+
+@media (max-width: 575px) {
+  .subtitle { font-size: 1.05rem; font-weight: 600; }
+}
+
+/* Footer styles */
+.app-footer { background: #000000de;}
+.app-footer .contact a { color: inherit; text-decoration: underline; }
+.app-footer .social a { color: inherit; }
+.app-footer .social a:hover { color: #0b5ed7; }
+.app-footer .logo-footer img { display: block; }
+
+@media (max-width: 576px) {
+  .app-footer { text-align: center; }
+  .app-footer .container { padding-left: 0.5rem; padding-right: 0.5rem; }
+  .app-footer .social { justify-content: center; margin-top: .25rem; }
+  .app-footer .logo-footer img { width: 120px; margin: 0 auto; }
+}
+
+.app-footer.border-top {
+  color: #ffffffc7;
+}
+
+.text {
+  color: #ffffffc7 !important;
 }

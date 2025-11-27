@@ -182,10 +182,10 @@
 				<div className="reportes-page container py-3">
 					<h2 className="tituloPagina mb-3">Reportes</h2>
 					<div className="mb-3 d-flex gap-2">
-						<button className={`btn btn-info ${mode==='por-clientes'?'active':''}`} onClick={()=>setMode('por-clientes')}>Listado de reservas por cliente</button>
-						<button className={`btn btn-info ${mode==='canchas-mas-utilizadas'?'active':''}`} onClick={()=>setMode('canchas-mas-utilizadas')}>Canchas más utilizadas</button>
-						<button className={`btn btn-info`} onClick={openYearModal}>Utilización mensual de canchas</button>
-						<button className={`btn btn-info ${mode==='por-canchas'?'active':''}`} onClick={()=>setMode('por-canchas')}>Reservas por canchas en período</button>
+						<button className={`btn btn-outline-info ${mode==='por-clientes'?'active':''}`} onClick={()=>setMode('por-clientes')}>Listado de reservas por cliente</button>
+						<button className={`btn btn-outline-info ${mode==='canchas-mas-utilizadas'?'active':''}`} onClick={()=>setMode('canchas-mas-utilizadas')}>Canchas más utilizadas</button>
+						<button className={`btn btn-outline-info`} onClick={openYearModal}>Utilización mensual de canchas</button>
+						<button className={`btn btn-outline-info ${mode==='por-canchas'?'active':''}`} onClick={()=>setMode('por-canchas')}>Reservas por canchas en período</button>
 					</div>
 
 					<div className="card mb-3">

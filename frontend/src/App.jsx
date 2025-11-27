@@ -8,6 +8,7 @@ import { Canchas } from "./components/canchas/Canchas";
 import { Reportes } from "./components/reportes/Reportes";
 import { Reservas } from "./components/reservas/Reservas";
 import { Clientes } from "./components/clientes/Clientes";
+import { Footer } from "./components/Footer";
 
 
 function App() {
@@ -28,6 +29,7 @@ function App() {
             <Route path="/reservas" element={<Reservas />} />
           </Routes>
         </div>
+        <Footer />
       </BrowserRouter>
     </>
   );
