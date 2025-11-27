@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, date, time
 
 from db.connection import fetchall, fetchone, execute
 from backend.models.cancha import Cancha
@@ -39,7 +39,15 @@ def _row_to_reserva(row: Dict[str, Any]) -> Reserva:
         cancha_obj._servicios = []
         cancha_obj._precio = row.get('precio_final') or tipo_obj_for_cancha.get_precio()
         try:
-            cancha_obj.nombre = row.get('cancha_nombre')
+            # derive a display name: prefer explicit cancha_nombre if provided, otherwise use tipo name + id
+            if row.get('cancha_nombre'):
+                cancha_obj.nombre = row.get('cancha_nombre')
+            else:
+                tipo_name = row.get('cancha_tipo') or tipo_nombre or ''
+                if tipo_name:
+                    cancha_obj.nombre = f"{tipo_name} #{getattr(cancha_obj, '_id', '')}"
+                else:
+                    cancha_obj.nombre = f"Cancha {getattr(cancha_obj, '_id', '')}"
         except Exception:
             pass
 
@@ -51,7 +59,19 @@ def _row_to_reserva(row: Dict[str, Any]) -> Reserva:
         pass
 
     try:
-        r.cancha_nombre = row.get('cancha_nombre')
+        # prefer cancha.nombre if available, otherwise derive from tipo_cancha
+        try:
+            if getattr(cancha_obj, 'nombre', None):
+                r.cancha_nombre = cancha_obj.nombre
+            else:
+                if row.get('cancha_nombre'):
+                    r.cancha_nombre = row.get('cancha_nombre')
+                elif row.get('cancha_tipo'):
+                    r.cancha_nombre = f"{row.get('cancha_tipo')} #{row.get('cancha_id')}"
+                else:
+                    r.cancha_nombre = f"Cancha {row.get('cancha_id')}"
+        except Exception:
+            r.cancha_nombre = row.get('cancha_nombre')
         r.fecha = row.get('fecha')
         try:
             hrs = fetchall("SELECT h.id, h.inicio, h.fin FROM horario h JOIN reserva_x_horario rx ON h.id = rx.horario_id WHERE rx.reserva_id = ? ORDER BY h.inicio", (row.get('id'),))
@@ -126,8 +146,49 @@ def crear_reserva(reserva: Dict[str, Any]) -> int:
     if not cancha_id or not cliente_dni or not fecha or not horario_ids or not precio:
         raise ValueError('Faltan campos en la reserva. Se requieren: cancha_id, cliente_dni, fecha, horario_ids, precio')
 
+    # validate fecha not in the past (allow today)
+    try:
+        fecha_dt = datetime.fromisoformat(fecha).date()
+    except Exception:
+        raise ValueError('Formato de fecha inválido. Use YYYY-MM-DD')
+    if fecha_dt < date.today():
+        raise ValueError('La fecha de la reserva debe ser igual o posterior a la fecha actual')
+
     if isinstance(horario_ids, int):
         horario_ids = [horario_ids]
+
+    # if any selected horario is an evening slot (starts at or after 19:00 or ends after 19:00),
+    # require that the cancha has an illumination service
+    try:
+        placeholders = ','.join('?' for _ in horario_ids)
+        qh = f"SELECT id, inicio, fin FROM horario WHERE id IN ({placeholders})"
+        hrs = fetchall(qh, tuple(horario_ids)) if horario_ids else []
+        needs_illum = False
+        for h in hrs:
+            inicio = h.get('inicio') if isinstance(h, dict) else getattr(h, 'inicio', None)
+            fin = h.get('fin') if isinstance(h, dict) else getattr(h, 'fin', None)
+            try:
+                parts = str(inicio).split(':')
+                hh = int(parts[0]) if parts and parts[0].isdigit() else None
+            except Exception:
+                hh = None
+            try:
+                partsf = str(fin).split(':')
+                ff = int(partsf[0]) if partsf and partsf[0].isdigit() else None
+            except Exception:
+                ff = None
+            if (hh is not None and hh >= 19) or (ff is not None and ff > 19):
+                needs_illum = True
+                break
+        if needs_illum:
+            row = fetchone("SELECT COUNT(1) as cnt FROM cancha_x_servicio cx JOIN servicio s ON cx.servicio_id = s.id WHERE cx.cancha_id = ? AND LOWER(s.nombre) LIKE ?", (cancha_id, '%ilumin%'))
+            if not row or row.get('cnt', 0) == 0:
+                raise ValueError('La cancha seleccionada no dispone de iluminación nocturna necesaria para horarios posteriores a las 19:00')
+    except ValueError:
+        raise
+    except Exception:
+        # on error checking, be conservative and allow creation (avoid blocking due to check failure)
+        pass
 
     for hid in horario_ids:
         if not verificar_disponibilidad_por_horario(cancha_id, fecha, hid):
@@ -147,6 +208,81 @@ def cancelar_reserva(reserva_id: int) -> None:
     row = fetchone("SELECT COUNT(1) as cnt FROM pago WHERE reserva_id = ?", (reserva_id,))
     if row and row.get('cnt', 0) > 0:
         raise ValueError(f"No se puede eliminar reserva {reserva_id}: existen pagos asociados")
+    # Do not allow deleting reservations that already finished (historic)
+    try:
+        existing = obtener_reserva(reserva_id)
+        if existing:
+            # determine existing fecha
+            try:
+                existing_fecha = existing.get_fecha() if hasattr(existing, 'get_fecha') else getattr(existing, 'fecha', None)
+                if isinstance(existing_fecha, str):
+                    existing_fecha_dt = datetime.fromisoformat(existing_fecha).date()
+                elif isinstance(existing_fecha, datetime):
+                    existing_fecha_dt = existing_fecha.date()
+                elif isinstance(existing_fecha, date):
+                    existing_fecha_dt = existing_fecha
+                else:
+                    existing_fecha_dt = None
+            except Exception:
+                existing_fecha_dt = None
+
+            now_date = date.today()
+            if existing_fecha_dt is not None:
+                if existing_fecha_dt < now_date:
+                    raise ValueError('No se puede eliminar una reserva que ya finalizó (histórico)')
+                if existing_fecha_dt == now_date:
+                    # if today, check if all horarios already finished
+                    try:
+                        raw_hs = getattr(existing, 'horarios', []) or []
+                        max_fin_min = None
+                        earliest_start_min = None
+                        for h in raw_hs:
+                            inicio = None
+                            fin = None
+                            if isinstance(h, dict):
+                                inicio = h.get('inicio')
+                                fin = h.get('fin')
+                            else:
+                                inicio = getattr(h, 'inicio', None) or getattr(h, '_inicio', None)
+                                fin = getattr(h, 'fin', None) or getattr(h, '_fin', None)
+                            if inicio and fin:
+                                parts_i = str(inicio).split(':')
+                                parts_f = str(fin).split(':')
+                                try:
+                                    ih = int(parts_i[0])
+                                    im = int(parts_i[1]) if len(parts_i) > 1 else 0
+                                    fh = int(parts_f[0])
+                                    fm = int(parts_f[1]) if len(parts_f) > 1 else 0
+                                except Exception:
+                                    continue
+                                start_min = ih * 60 + im
+                                end_min = fh * 60 + fm
+                                if end_min <= start_min:
+                                    end_min += 24 * 60
+                                if earliest_start_min is None or start_min < earliest_start_min:
+                                    earliest_start_min = start_min
+                                if max_fin_min is None or end_min > max_fin_min:
+                                    max_fin_min = end_min
+                        if max_fin_min is not None:
+                            now = datetime.now()
+                            now_min = now.hour * 60 + now.minute
+                            now_comp = now_min
+                            if max_fin_min > 24 * 60 and earliest_start_min is not None and now_min < earliest_start_min:
+                                now_comp = now_min + 24 * 60
+                            if now_comp > max_fin_min:
+                                raise ValueError('No se puede eliminar una reserva que ya finalizó (histórico)')
+                    except ValueError:
+                        raise
+                    except Exception:
+                        # if any parsing error, proceed with deletion (avoid blocking)
+                        pass
+    except ValueError:
+        # re-raise user-facing errors
+        raise
+    except Exception:
+        # ignore and proceed to deletion
+        pass
+
     execute("DELETE FROM reserva_x_horario WHERE reserva_id = ?", (reserva_id,))
     execute("DELETE FROM reserva WHERE id = ?", (reserva_id,))
 
@@ -173,6 +309,81 @@ def actualizar_reserva(reserva_id: int, reserva: Dict[str, Any]) -> int:
     if not cancha_id or not cliente_dni or not fecha or not horario_ids or not precio:
         raise ValueError('Faltan campos en la reserva. Se requieren: cancha_id, cliente_dni, fecha, horario_ids, precio')
 
+    # don't allow modifying if the existing reservation is already finished
+    try:
+        existing = obtener_reserva(reserva_id)
+        if existing:
+            # obtain existing fecha as date
+            try:
+                existing_fecha = existing.get_fecha() if hasattr(existing, 'get_fecha') else getattr(existing, 'fecha', None)
+                if isinstance(existing_fecha, str):
+                    existing_fecha_dt = datetime.fromisoformat(existing_fecha).date()
+                elif isinstance(existing_fecha, datetime):
+                    existing_fecha_dt = existing_fecha.date()
+                elif isinstance(existing_fecha, date):
+                    existing_fecha_dt = existing_fecha
+                else:
+                    existing_fecha_dt = None
+            except Exception:
+                existing_fecha_dt = None
+
+            now_date = date.today()
+            if existing_fecha_dt is not None:
+                if existing_fecha_dt < now_date:
+                    raise ValueError('No se puede modificar una reserva que ya finalizó')
+                if existing_fecha_dt == now_date:
+                    # if today, check horario end times: if current time is past all horarios' end, consider finished
+                    try:
+                        raw_hs = getattr(existing, 'horarios', []) or []
+                        max_fin_min = None
+                        earliest_start_min = None
+                        for h in raw_hs:
+                            inicio = None
+                            fin = None
+                            if isinstance(h, dict):
+                                inicio = h.get('inicio')
+                                fin = h.get('fin')
+                            else:
+                                inicio = getattr(h, 'inicio', None) or getattr(h, '_inicio', None)
+                                fin = getattr(h, 'fin', None) or getattr(h, '_fin', None)
+                            if inicio and fin:
+                                parts_i = str(inicio).split(':')
+                                parts_f = str(fin).split(':')
+                                try:
+                                    ih = int(parts_i[0])
+                                    im = int(parts_i[1]) if len(parts_i) > 1 else 0
+                                    fh = int(parts_f[0])
+                                    fm = int(parts_f[1]) if len(parts_f) > 1 else 0
+                                except Exception:
+                                    continue
+                                start_min = ih * 60 + im
+                                end_min = fh * 60 + fm
+                                if end_min <= start_min:
+                                    end_min += 24 * 60
+                                if earliest_start_min is None or start_min < earliest_start_min:
+                                    earliest_start_min = start_min
+                                if max_fin_min is None or end_min > max_fin_min:
+                                    max_fin_min = end_min
+                        if max_fin_min is not None:
+                            now = datetime.now()
+                            now_min = now.hour * 60 + now.minute
+                            now_comp = now_min
+                            if max_fin_min > 24 * 60 and earliest_start_min is not None and now_min < earliest_start_min:
+                                now_comp = now_min + 24 * 60
+                            if now_comp > max_fin_min:
+                                raise ValueError('No se puede modificar una reserva que ya finalizó')
+                    except ValueError:
+                        raise
+                    except Exception:
+                        # on any parsing issue, be conservative and allow modification
+                        pass
+    except ValueError:
+        # re-raise explicit user errors
+        raise
+    except Exception:
+        # ignore errors in checking and proceed (don't block update)
+        pass
+
     if isinstance(horario_ids, int):
         horario_ids = [horario_ids]
 
@@ -182,6 +393,37 @@ def actualizar_reserva(reserva_id: int, reserva: Dict[str, Any]) -> int:
         row = fetchone(q, (cancha_id, fecha, hid, reserva_id))
         if row and row.get('cnt', 0) > 0:
             raise ValueError(f'Horario {hid} no disponible para la cancha {cancha_id} en la fecha {fecha}')
+
+    # same illumination requirement check as in crear_reserva
+    try:
+        placeholders = ','.join('?' for _ in horario_ids)
+        qh = f"SELECT id, inicio, fin FROM horario WHERE id IN ({placeholders})"
+        hrs = fetchall(qh, tuple(horario_ids)) if horario_ids else []
+        needs_illum = False
+        for h in hrs:
+            inicio = h.get('inicio') if isinstance(h, dict) else getattr(h, 'inicio', None)
+            fin = h.get('fin') if isinstance(h, dict) else getattr(h, 'fin', None)
+            try:
+                parts = str(inicio).split(':')
+                hh = int(parts[0]) if parts and parts[0].isdigit() else None
+            except Exception:
+                hh = None
+            try:
+                partsf = str(fin).split(':')
+                ff = int(partsf[0]) if partsf and partsf[0].isdigit() else None
+            except Exception:
+                ff = None
+            if (hh is not None and hh >= 19) or (ff is not None and ff > 19):
+                needs_illum = True
+                break
+        if needs_illum:
+            row = fetchone("SELECT COUNT(1) as cnt FROM cancha_x_servicio cx JOIN servicio s ON cx.servicio_id = s.id WHERE cx.cancha_id = ? AND LOWER(s.nombre) LIKE ?", (cancha_id, '%ilumin%'))
+            if not row or row.get('cnt', 0) == 0:
+                raise ValueError('La cancha seleccionada no dispone de iluminación nocturna necesaria para horarios posteriores a las 19:00')
+    except ValueError:
+        raise
+    except Exception:
+        pass
 
     # update reserva row
     q = "UPDATE reserva SET cancha_id = ?, cliente_dni = ?, precio_final = ?, fecha = ?, torneo_id = ? WHERE id = ?"

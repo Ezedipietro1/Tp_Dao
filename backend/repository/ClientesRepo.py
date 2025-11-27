@@ -12,7 +12,12 @@ def crear_cliente(cliente: Dict[str, Any]) -> int:
     return execute(q, (cliente.get('dni'), cliente.get('nombre'), cliente.get('telefono')))
 
 
-def listar_clientes() -> List[Dict[str, Any]]:
+def listar_clientes(nombre: str = None) -> List[Dict[str, Any]]:
+    if nombre and str(nombre).strip() != "":
+        # Perform case-insensitive partial match on nombre
+        q = "SELECT dni, nombre, telefono FROM cliente WHERE lower(nombre) LIKE ? ORDER BY nombre"
+        param = ('%' + str(nombre).lower() + '%',)
+        return fetchall(q, param)
     q = "SELECT dni, nombre, telefono FROM cliente ORDER BY dni"
     return fetchall(q)
 

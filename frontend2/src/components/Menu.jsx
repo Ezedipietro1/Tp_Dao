@@ -50,6 +50,11 @@ function Menu() {
               Reportes
             </NavLink>
           </li>
+          <li className="nav-item">
+            <NavLink className="nav-link" to="/torneos">
+              Torneos
+            </NavLink>
+          </li>
         </ul>
       </div>
     </nav>

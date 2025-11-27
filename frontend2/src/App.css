@@ -39,6 +39,27 @@ footer {
   margin-bottom: 0.5em;
 }
 
+/* Overrides for the Reportes page: labels there are simple and shouldn't use the global fancy label style */
+.reportes-page label:not([class^="custom-control"]) {
+  background-color: transparent;
+  border-radius: 0;
+  border-bottom: none;
+  margin-right: 0;
+  padding-left: 0;
+  display: block;
+  height: auto;
+}
+
+.reportes-page .tituloPagina {
+  color: #0b5ed7; /* blue title on white background */
+  text-shadow: none;
+  border-bottom: none;
+}
+
+.reportes-page .card {
+  box-shadow: none; /* keep cards flat like the desired layout */
+}
+
 /* todos los formularios */
 form {
   background-color: rgb(241, 243, 247);

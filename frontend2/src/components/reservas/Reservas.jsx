@@ -41,7 +41,15 @@ function Reservas() {
     async function Buscar() {
       modalDialogService.BloquearPantalla(true);
       const params = {};
-      if (Nombre) params.cliente_dni = Nombre;
+      if (Nombre) {
+        // if Nombre looks like a DNI (all digits, length 7-8) search by dni, otherwise search by client name
+        const cleaned = (Nombre || '').trim();
+        if (/^\d{7,8}$/.test(cleaned)) {
+          params.cliente_dni = cleaned;
+        } else {
+          params.cliente_nombre = cleaned;
+        }
+      }
       const data = await reservasService.Buscar(params);
       modalDialogService.BloquearPantalla(false);
       setItems(data);
@@ -49,6 +57,16 @@ function Reservas() {
   
   
     async function BuscarPorId(item, accionABMC) {
+      // If the item passed came from the current list and already contains
+      // the lookup ids (cancha_id, cliente_dni), prefer using it directly
+      // because the server's GET by id may return a differently-shaped object
+      // lacking those ids. This keeps the form populated correctly.
+      if (item && (item.cancha_id || item.cliente_dni || item.horarios)) {
+        setItem(item);
+        setAccionABMC(accionABMC);
+        return;
+      }
+
       const data = await reservasService.BuscarPorId(item);
       setItem(data);
       setAccionABMC(accionABMC);
@@ -71,16 +89,70 @@ function Reservas() {
     }
   
     async function ActivarDesactivar(item) {
+      // Do not allow deleting reservations that already finished (historic)
+      try {
+        let isFinished = false;
+        const fecha = item.fecha;
+        if (fecha) {
+          const resDate = new Date(fecha + 'T00:00:00');
+          const today = new Date();
+          const todayYMD = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+          if (resDate < todayYMD) {
+            isFinished = true;
+          } else if (resDate.getTime() === todayYMD.getTime()) {
+            const hs = item.horarios || [];
+            let maxEndMin = null;
+            let earliestStartMin = null;
+            hs.forEach(h => {
+              const inicio = h?.inicio;
+              const fin = h?.fin;
+              if (inicio && fin) {
+                const partsI = inicio.split(":");
+                const partsF = fin.split(":");
+                const ih = parseInt(partsI[0]);
+                const im = partsI.length>1?parseInt(partsI[1]):0;
+                const fh = parseInt(partsF[0]);
+                const fm = partsF.length>1?parseInt(partsF[1]):0;
+                if (!Number.isNaN(ih) && !Number.isNaN(fh)) {
+                  const startMin = ih*60 + (Number.isNaN(im)?0:im);
+                  let endMin = fh*60 + (Number.isNaN(fm)?0:fm);
+                  if (endMin <= startMin) endMin += 24*60;
+                  if (earliestStartMin === null || startMin < earliestStartMin) earliestStartMin = startMin;
+                  if (maxEndMin === null || endMin > maxEndMin) maxEndMin = endMin;
+                }
+              }
+            });
+            if (maxEndMin !== null) {
+              const now = new Date();
+              const nowMin = now.getHours()*60 + now.getMinutes();
+              let nowComp = nowMin;
+              if (maxEndMin > 24*60 && earliestStartMin !== null && nowMin < earliestStartMin) nowComp = nowMin + 24*60;
+              if (nowComp > maxEndMin) isFinished = true;
+            }
+          }
+        }
+        if (isFinished) {
+          modalDialogService.Alert('No se pueden eliminar reservas que ya finalizaron. Permanecen como histórico.');
+          return;
+        }
+      } catch (e) {
+        // ignore parsing errors and continue with confirmation
+      }
+
       modalDialogService.Confirm(
-        "Esta seguro que quiere " +
-          (item.Activo ? "desactivar" : "activar") +
-          " el registro?",
+        "¿Eliminar esta reserva? Esta acción es irreversible.",
         undefined,
         undefined,
         undefined,
         async () => {
-          await reservasService.Eliminar(item);
-          await Buscar();
+          try {
+            await reservasService.Eliminar(item);
+            await Buscar();
+            modalDialogService.Alert('Reserva eliminada correctamente.');
+          } catch (err) {
+            const msg = err?.response?.data?.error || err?.response?.data?.detail || err?.message || String(err);
+            modalDialogService.Alert(msg);
+          }
         }
       );
     }

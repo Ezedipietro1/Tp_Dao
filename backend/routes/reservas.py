@@ -9,9 +9,26 @@ def api_listar_reservas():
     try:
         cancha_id = request.args.get('cancha_id', type=int)
         cliente_dni = request.args.get('cliente_dni')
+        cliente_nombre = request.args.get('cliente_nombre')
         reservas = repositorio.listar_reservas(cancha_id if cancha_id else None)
         if cliente_dni:
             reservas = [r for r in reservas if (getattr(r, 'cliente', None) and (hasattr(r.cliente, 'get_dni') and r.cliente.get_dni() == cliente_dni)) or getattr(r, 'cliente_dni', None) == cliente_dni]
+        if cliente_nombre:
+            qname = cliente_nombre.strip().lower()
+            if qname:
+                def match_name(r):
+                    try:
+                        name = None
+                        if getattr(r, 'cliente', None) and hasattr(r.cliente, 'get_nombre'):
+                            name = r.cliente.get_nombre()
+                        if not name:
+                            name = getattr(r, 'cliente_nombre', None)
+                        if not name:
+                            return False
+                        return qname in str(name).lower()
+                    except Exception:
+                        return False
+                reservas = [r for r in reservas if match_name(r)]
 
         def reserva_to_dict(r):
             try:
@@ -165,3 +182,59 @@ def api_eliminar_reserva(reserva_id):
 def api_cancelar_reserva(reserva_id):
     repositorio.cancelar_reserva(reserva_id)
     return jsonify({'reserva_id': reserva_id, 'status': 'cancelada'})
+
+
+@reservas_bp.route('/reservas/horarios', methods=['GET'])
+def api_listar_horarios_disponibles():
+    """Devuelve la lista de horarios con flag `disponible` para la cancha/fecha indicadas.
+    Query params: cancha_id (int), fecha (YYYY-MM-DD)
+    """
+    try:
+        cancha_id = request.args.get('cancha_id', type=int)
+        fecha = request.args.get('fecha', type=str)
+        if not cancha_id or not fecha:
+            return jsonify({'error': 'Se requieren parametros cancha_id y fecha'}), 400
+
+        horarios = repositorio.listar_horarios()
+        out = []
+        for h in horarios:
+            hid = h.get('id') if isinstance(h, dict) else (h.id if hasattr(h, 'id') else (h.get_id() if hasattr(h, 'get_id') else None))
+            inicio = h.get('inicio') if isinstance(h, dict) else (getattr(h, 'inicio', None) or getattr(h, '_inicio', None))
+            fin = h.get('fin') if isinstance(h, dict) else (getattr(h, 'fin', None) or getattr(h, '_fin', None))
+            disponible = True
+            try:
+                disponible = repositorio.verificar_disponibilidad_por_horario(cancha_id, fecha, hid)
+            except Exception:
+                disponible = True
+            # additionally mark horarios in the past (for today's date) as unavailable
+            try:
+                from datetime import datetime
+                if fecha == datetime.now().date().isoformat() and fin:
+                    # compute start and end minutes; treat end <= start as next-day end
+                    parts_fin = str(fin).split(":")
+                    parts_ini = str(inicio).split(":") if inicio else []
+                    fh = int(parts_fin[0]) if len(parts_fin) > 0 and parts_fin[0].isdigit() else None
+                    fm = int(parts_fin[1]) if len(parts_fin) > 1 and parts_fin[1].isdigit() else 0
+                    ih = int(parts_ini[0]) if len(parts_ini) > 0 and parts_ini[0].isdigit() else None
+                    im = int(parts_ini[1]) if len(parts_ini) > 1 and parts_ini[1].isdigit() else 0
+                    if fh is not None and ih is not None:
+                        now = datetime.now()
+                        now_min = now.hour * 60 + now.minute
+                        start_min = ih * 60 + im
+                        end_min = fh * 60 + fm
+                        if end_min <= start_min:
+                            end_min += 24 * 60
+                        # when slot spans midnight and current time is after midnight (now_min < start_min),
+                        # compare a shifted now to the shifted end.
+                        now_comp = now_min
+                        if end_min > 24 * 60 and now_min < start_min:
+                            now_comp = now_min + 24 * 60
+                        if now_comp >= end_min:
+                            disponible = False
+            except Exception:
+                pass
+            out.append({'id': hid, 'inicio': inicio, 'fin': fin, 'label': f"{inicio}-{fin}" if inicio and fin else f"{hid}", 'disponible': bool(disponible)})
+
+        return jsonify(out)
+    except Exception as e:
+        return jsonify({'error': 'Error al listar horarios', 'detail': str(e)}), 500

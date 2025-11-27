@@ -45,7 +45,8 @@ function Clientes() {
   }
   
   function Modificar(item) {
-    if (!item.Activo) {
+    // Only block modification if item explicitly has Activo === false
+    if (Object.prototype.hasOwnProperty.call(item, 'Activo') && item.Activo === false) {
       modalDialogService.Alert("No puede modificarse un registro Inactivo.");
       return;
     }
@@ -64,16 +65,21 @@ function Clientes() {
   }
 
   async function ActivarDesactivar(item) {
+    // Confirm deletion of a client. Show clear irreversible message.
     modalDialogService.Confirm(
-      "Esta seguro que quiere " +
-        (item.Activo ? "desactivar" : "activar") +
-        " el registro?",
+      "¿Eliminar este cliente? Esta acción es irreversible.",
       undefined,
       undefined,
       undefined,
       async () => {
-        await clientesService.Eliminar(item);
-        await Buscar();
+        try {
+          await clientesService.Eliminar(item);
+          await Buscar();
+          modalDialogService.Alert('Cliente eliminado correctamente.');
+        } catch (err) {
+          const msg = err?.response?.data?.error || err?.response?.data?.detail || err?.message || String(err);
+          modalDialogService.Alert(msg);
+        }
       }
     );
   }

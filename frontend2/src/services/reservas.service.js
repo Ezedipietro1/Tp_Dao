@@ -24,9 +24,16 @@ async function Grabar(item) {
   await axios.post(urlResource, item);
 }
 
+async function ListarHorariosDisponibles(params) {
+  // params: { cancha_id: number, fecha: 'YYYY-MM-DD' }
+  const resp = await axios.get(`${urlResource}/horarios`, { params });
+  return resp.data;
+}
+
 export const reservasService = {
   Buscar,
   BuscarPorId,
   Eliminar,
   Grabar,
+  ListarHorariosDisponibles
 };

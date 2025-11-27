@@ -181,7 +181,7 @@ export default function CanchasRegistro({
           {/* campo Tipo de Cancha (select) */}
           <div className="row">
             <div className="col-sm-4 col-md-3 offset-md-1">
-              <label className="col-form-label" htmlFor="tipo_cancha_id">Tipo Cancha<span className="text-danger">*</span>:</label>
+              <label className="col-form-label" htmlFor="tipo_cancha_id">Tipo Cancha{AccionABMC !== "C" && <span className="text-danger">*</span>}:</label>
             </div>
             <div className="col-sm-8 col-md-6">
               <select

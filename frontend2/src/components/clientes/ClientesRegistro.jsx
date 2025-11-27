@@ -16,7 +16,7 @@ export default function ClientesRegistro({ AccionABMC, Item, Grabar, Volver, Fun
     register,
     handleSubmit,
     formState: { errors, isValid, isSubmitted },
-  } = useForm({ values: Item });
+  } = useForm({ defaultValues: Item });
 
   const onSubmit = (data) => {
     Grabar(data, Func);
@@ -34,7 +34,7 @@ export default function ClientesRegistro({ AccionABMC, Item, Grabar, Volver, Fun
               <label className="col-form-label" htmlFor="dni">DNI<span className="text-danger">*</span>:</label>
             </div>
             <div className="col-sm-8 col-md-6">
-              <input type="text" {...register("dni", { required: { value: true, message: "DNI es requerido" }, pattern: { value: /^\\d{7,8}$/, message: "DNI debe tener 7 u 8 dígitos" } })} className={"form-control " + (errors?.dni ? "is-invalid" : "") } />
+              <input type="text" disabled={AccionABMC === "M"} {...register("dni", { required: { value: true, message: "DNI es requerido" }, pattern: { value: /^\d{7,8}$/, message: "DNI debe tener 7 u 8 dígitos" } })} className={"form-control " + (errors?.dni ? "is-invalid" : "") } />
               <div className="invalid-feedback">{errors?.dni?.message}</div>
             </div>
           </div>
@@ -45,7 +45,7 @@ export default function ClientesRegistro({ AccionABMC, Item, Grabar, Volver, Fun
               <label className="col-form-label" htmlFor="nombre">Nombre<span className="text-danger">*</span>:</label>
             </div>
             <div className="col-sm-8 col-md-6">
-              <input type="text" {...register("nombre", { required: { value: true, message: "Nombre es requerido" } })} className={"form-control " + (errors?.nombre ? "is-invalid" : "") } />
+              <input type="text" {...register("nombre", { required: { value: true, message: "Nombre es requerido" }, pattern: { value: /^\p{L}+(?:[\s'\-]\p{L}+)*$/u, message: "Nombre sólo debe contener letras y espacios" } })} className={"form-control " + (errors?.nombre ? "is-invalid" : "") } />
               <div className="invalid-feedback">{errors?.nombre?.message}</div>
             </div>
           </div>
@@ -56,7 +56,7 @@ export default function ClientesRegistro({ AccionABMC, Item, Grabar, Volver, Fun
               <label className="col-form-label" htmlFor="telefono">Teléfono:</label>
             </div>
             <div className="col-sm-8 col-md-6">
-              <input type="text" {...register("telefono")} className={"form-control " + (errors?.telefono ? "is-invalid" : "") } />
+              <input type="tel" maxLength="10" {...register("telefono", { pattern: { value: /^\d{10}$/, message: "Teléfono debe contener exactamente 10 dígitos" } })} className={"form-control " + (errors?.telefono ? "is-invalid" : "") } />
               <div className="invalid-feedback">{errors?.telefono?.message}</div>
             </div>
           </div>

@@ -8,7 +8,8 @@ clientes_bp = Blueprint('clientes', __name__)
 @clientes_bp.route('/clientes', methods=['GET'])
 def api_listar_clientes():
     try:
-        cs = repositorio.listar_clientes()
+        nombre = request.args.get('nombre')
+        cs = repositorio.listar_clientes(nombre=nombre) if nombre else repositorio.listar_clientes()
         return jsonify(cs)
     except Exception as e:
         return jsonify({'error': 'Error al obtener clientes', 'detail': str(e)}), 500
@@ -27,8 +28,9 @@ def api_crear_cliente():
     if not re.match(r"^[A-Za-zÀ-ÿ\s]+$", nombre_val):
         return jsonify({'error': 'Nombre inválido. Solo se permiten letras y espacios.'}), 400
     if telefono_val is not None and str(telefono_val).strip() != '':
-        if not str(telefono_val).isdigit():
-            return jsonify({'error': 'Teléfono inválido. Solo se permiten dígitos.'}), 400
+        t = str(telefono_val).strip()
+        if not t.isdigit() or len(t) != 10:
+            return jsonify({'error': 'Teléfono inválido. Debe contener exactamente 10 dígitos.'}), 400
     try:
         repositorio.crear_cliente(payload)
         return jsonify({'dni': payload.get('dni')}), 201
@@ -61,8 +63,9 @@ def api_actualizar_cliente(dni):
     if 'telefono' in payload:
         telefono_val = payload.get('telefono')
         if telefono_val is not None and str(telefono_val).strip() != '':
-            if not str(telefono_val).isdigit():
-                return jsonify({'error': 'Teléfono inválido. Solo se permiten dígitos.'}), 400
+            t = str(telefono_val).strip()
+            if not t.isdigit() or len(t) != 10:
+                return jsonify({'error': 'Teléfono inválido. Debe contener exactamente 10 dígitos.'}), 400
     try:
         repositorio.actualizar_cliente(dni, payload)
         c = repositorio.get_cliente_por_dni(dni)
