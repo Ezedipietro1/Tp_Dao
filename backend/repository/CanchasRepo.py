@@ -168,6 +168,12 @@ def buscar_canchas(filters: Dict[str, Any]) -> List[Cancha]:
     if 'tipo_cancha_id' in filters and filters['tipo_cancha_id'] is not None:
         clauses.append('c.tipo_cancha_id = ?')
         params.append(filters['tipo_cancha_id'])
+    # optional name filter: match against cancha.nombre or tipo_cancha.nombre (case-insensitive LIKE)
+    if 'nombre' in filters and filters['nombre']:
+        # search only against tipo_cancha.nombre (db doesn't have c.nombre column)
+        clauses.append("LOWER(COALESCE(tc.nombre, '')) LIKE ?")
+        term = f"%{str(filters['nombre']).strip().lower()}%"
+        params.append(term)
     if 'min_precio' in filters and filters['min_precio'] is not None:
         clauses.append('COALESCE(c.precio_final, tc.precio) >= ?')
         params.append(filters['min_precio'])

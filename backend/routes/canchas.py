@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify, request
 import re
 from ..repository import repositorio
+import traceback
 
 canchas_bp = Blueprint('canchas', __name__)
 
@@ -11,9 +12,16 @@ def api_listar_canchas():
         tipo_cancha_id = request.args.get('tipo_cancha_id', type=int)
         min_precio = request.args.get('min_precio', type=float)
         max_precio = request.args.get('max_precio', type=float)
-        if tipo_cancha_id is not None or min_precio is not None or max_precio is not None:
-            filters = {'tipo_cancha_id': tipo_cancha_id, 'min_precio': min_precio, 'max_precio': max_precio}
-            data = repositorio.buscar_canchas(filters)
+        nombre = request.args.get('nombre', type=str)
+        # if any filter provided, delegate to buscar_canchas which handles the filtering
+        if tipo_cancha_id is not None or min_precio is not None or max_precio is not None or (nombre is not None and nombre.strip() != ''):
+            filters = {'tipo_cancha_id': tipo_cancha_id, 'min_precio': min_precio, 'max_precio': max_precio, 'nombre': nombre}
+            try:
+                data = repositorio.buscar_canchas(filters)
+            except Exception as e:
+                tb = traceback.format_exc()
+                # return traceback in response for debugging in dev
+                return jsonify({'error': 'Error en buscar_canchas', 'detail': str(e), 'traceback': tb}), 500
         else:
             data = repositorio.listar_canchas()
 
@@ -100,3 +108,21 @@ def api_get_cancha(cancha_id):
         return jsonify(c)
     except Exception as e:
         return jsonify({'error': 'Error al obtener cancha', 'detail': str(e)}), 500
+
+
+@canchas_bp.route('/canchas/tipos', methods=['GET'])
+def api_listar_tipos():
+    try:
+        data = repositorio.listar_tipos()
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({'error': 'Error al listar tipos', 'detail': str(e)}), 500
+
+
+@canchas_bp.route('/canchas/servicios', methods=['GET'])
+def api_listar_servicios():
+    try:
+        data = repositorio.listar_servicios()
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({'error': 'Error al listar servicios', 'detail': str(e)}), 500

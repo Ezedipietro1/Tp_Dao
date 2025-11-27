@@ -8,8 +8,9 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 DB_PATH = HERE / "DonBalon.db"
-SCHEMA = HERE / "schema.sql"
-SEED = HERE / "seed.sql"
+# schema and seed are located in the resources subfolder
+SCHEMA = HERE / "resources" / "schema.sql"
+SEED = HERE / "resources" / "seed.sql"
 
 def main():
     if DB_PATH.exists():
