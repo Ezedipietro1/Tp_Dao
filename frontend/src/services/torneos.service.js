@@ -33,4 +33,9 @@ async function eliminar(id){
   return resp.data;
 }
 
-export const torneosService = { listar, crear, actualizar, obtener, eliminar };
+async function syncReservas(id, payload){
+  const resp = await axios.post(`${resource}/${id}/reservas-sync`, payload);
+  return resp.data;
+}
+
+export const torneosService = { listar, crear, actualizar, obtener, eliminar, syncReservas };

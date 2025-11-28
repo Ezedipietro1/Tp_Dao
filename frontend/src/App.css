@@ -141,33 +141,6 @@ label:not([class^="custom-control"]) {
   padding: 0.5rem 0 0.25rem 0;
   margin-bottom: 0.25rem;
 }
-
-/* Alineación: etiquetas e inputs con la misma altura en el formulario de Torneo */
-.torneo-form .row.mb-2 {
-  align-items: center;
-}
-
-.torneo-form .col-form-label {
-  display: flex;
-  align-items: center;
-  min-height: 46px; /* coincide con la altura típica de inputs */
-  padding-top: .25rem;
-  padding-bottom: .25rem;
-}
-
-.torneo-form .form-control,
-.torneo-form .react-select__control {
-  min-height: 46px;
-  display: flex;
-  align-items: center;
-}
-
-/* Asegurar que los contenedores de títulos/encabezados dentro del formulario se alineen con los inputs */
-.torneo-form .section-title {
-  display: flex;
-  align-items: center;
-  min-height: 46px;
-}
 .torneo-form label:not([class^="custom-control"]) {
   height: 80%;
   padding-left: 0.4em;

@@ -15,6 +15,21 @@ function TorneoForm({ torneo = {}, onCancel, onSaved }) {
   const [clientes, setClientes] = useState([]);
   const [selectedClientOption, setSelectedClientOption] = useState(null);
 
+  // when the `torneo` prop changes (e.g., entering edit mode), sync local state
+  useEffect(() => {
+    try {
+      setNombre(torneo?.nombre || '');
+      setDescripcion(torneo?.descripcion || '');
+      setSelectedCanchas(torneo?.canchas || []);
+      // if torneo provides a cliente_dni (optional), prefill it
+      if (torneo && torneo.cliente_dni) {
+        setClienteDni(torneo.cliente_dni);
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [torneo]);
+
   useEffect(() => {
     (async () => {
       try { const cs = await canchasService.Buscar(); setCanchas(cs || []); } catch(e){ console.error(e); }
@@ -30,15 +45,37 @@ function TorneoForm({ torneo = {}, onCancel, onSaved }) {
     })();
   }, []);
 
+  // when clientes list is loaded and we have a clienteDni, try to select the matching option
+  useEffect(() => {
+    if (!clientes || clientes.length === 0) return;
+    if (!clienteDni) return;
+    const match = clientes.find(c => String(c.dni || c.DNI || c.id) === String(clienteDni));
+    if (match) {
+      const opt = { value: match.dni || match.DNI || match.id, label: `${match.dni || match.DNI || match.id} - ${match.nombre || ''} ${match.apellido || ''}` };
+      setSelectedClientOption(opt);
+    }
+  }, [clientes, clienteDni]);
+
   const toggleCancha = (id) => {
     setSelectedCanchas(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]);
   };
 
-  const save = async () => {
-    const payload = { nombre, descripcion, canchas: selectedCanchas };
+  const save = async (reservasData = null) => {
+    const payload = { nombre, descripcion, canchas: selectedCanchas, cliente_dni: clienteDni };
     try {
-      if (torneo && torneo.id) await torneosService.actualizar(torneo.id, payload);
-      else await torneosService.crear(payload);
+      if (torneo && torneo.id) {
+        await torneosService.actualizar(torneo.id, payload);
+        // if reservasData provided, synchronize reservas for this torneo
+        if (reservasData) {
+          try {
+            await torneosService.syncReservas(torneo.id, reservasData);
+          } catch (e) {
+            console.error('Error sincronizando reservas del torneo', e);
+          }
+        }
+      } else {
+        await torneosService.crear(payload);
+      }
       onSaved && onSaved();
     } catch (e) { console.error('Error guardando torneo', e); }
   };
@@ -111,7 +148,30 @@ function TorneoForm({ torneo = {}, onCancel, onSaved }) {
           </div>
         </div>
 
-        <ReservaBatchForm canchaIds={selectedCanchas} nombre={nombre} descripcion={descripcion} clienteDni={clienteDni} onCancel={onCancel} />
+        <ReservaBatchForm
+          canchaIds={selectedCanchas}
+          nombre={nombre}
+          descripcion={descripcion}
+          clienteDni={clienteDni}
+          onCancel={onCancel}
+          onSaved={onSaved}
+          onSave={save}
+          initialFecha={torneo?.fecha_inicio}
+          isEditing={Boolean(torneo && torneo.id)}
+          initialSelectedHorarios={(() => {
+            try {
+              const rows = torneo && torneo.reservas ? torneo.reservas : [];
+              const map = {};
+              (rows || []).forEach(r => {
+                (r.horarios || []).forEach(h => {
+                  const label = (h.inicio && h.fin) ? `${h.inicio}-${h.fin}` : (h.id ? String(h.id) : null);
+                  if (!label) return;
+                  if (!map[label]) map[label] = { id: h.id, inicio: h.inicio, fin: h.fin, label };
+                });
+              });
+              return Object.values(map);
+            } catch (e) { return []; }
+          })()} />
       </div>
     </form>
   );

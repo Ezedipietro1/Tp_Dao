@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { torneosService } from '../../services/torneos.service';
 import ReservaBatchForm from './ReservaBatchForm';
 
-function TorneoDetalle({ torneoId }){
+function TorneoDetalle({ torneoId, onCancel = null }){
   const [torneo, setTorneo] = useState(null);
 
   useEffect(()=>{
@@ -24,8 +24,7 @@ function TorneoDetalle({ torneoId }){
         </ul>
       </div>
       <div>
-        <h5>Programar reservas masivas</h5>
-        <ReservaBatchForm canchaIds={torneo.canchas || []} />
+        <ReservaBatchForm canchaIds={torneo.canchas || []} onCancel={onCancel} viewOnly={true} fechaReservas={torneo.fecha_inicio} />
       </div>
     </div>
   );

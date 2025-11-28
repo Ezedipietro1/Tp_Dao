@@ -62,7 +62,15 @@ function Torneos() {
                     </div>
                     <div>
                       <button className="btn btn-sm btn-outline-primary me-2" title="Ver" onClick={() => { setDetailId(t.id); setDetailVisible(true); }}>Ver</button>
-                      <button className="btn btn-sm btn-outline-secondary me-2" title="Editar" onClick={() => setEditing(t)}>Editar</button>
+                      <button className="btn btn-sm btn-outline-secondary me-2" title="Editar" onClick={async () => {
+                        try {
+                          const full = await torneosService.obtener(t.id);
+                          setEditing(full);
+                        } catch (e) {
+                          console.error('Error cargando torneo para editar', e);
+                          setEditing(t);
+                        }
+                      }}>Editar</button>
                       <button className="btn btn-sm btn-outline-danger" title="Eliminar" onClick={() => {
                         modalDialogService.Confirm(
                           '¿Eliminar este torneo? Esta acción es irreversible.',
@@ -91,7 +99,7 @@ function Torneos() {
               <Modal.Title>Detalle del Torneo</Modal.Title>
             </Modal.Header>
             <Modal.Body>
-              {detailId && <TorneoDetalle torneoId={detailId} />}
+              {detailId && <TorneoDetalle torneoId={detailId} onCancel={() => setDetailVisible(false)} />}
             </Modal.Body>
           </Modal>
       </div>

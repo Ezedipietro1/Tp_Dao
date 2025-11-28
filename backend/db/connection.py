@@ -2,6 +2,7 @@ import os
 import sqlite3
 from pathlib import Path
 from typing import Optional
+import time
 
 # dotenv is optional for local dev; if missing, continue with defaults
 try:
@@ -14,10 +15,16 @@ DEFAULT_DB = os.environ.get('TPC_DB_PATH') or str(Path(__file__).resolve().paren
 
 def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
     path = db_path or DEFAULT_DB
-    conn = sqlite3.connect(path, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
+    # Increase timeout so short concurrent operations wait instead of failing with "database is locked"
+    conn = sqlite3.connect(path, timeout=30, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
     conn.row_factory = sqlite3.Row
     # enable foreign keys
     conn.execute('PRAGMA foreign_keys = ON;')
+    # improve concurrency by using WAL journal mode
+    try:
+        conn.execute('PRAGMA journal_mode = WAL;')
+    except Exception:
+        pass
     return conn
 
 
@@ -44,13 +51,37 @@ def run_script(path: str, db_path: Optional[str] = None):
 
 
 def execute(query: str, params: tuple = (), db_path: Optional[str] = None):
-    conn = get_connection(db_path)
-    cur = conn.cursor()
-    cur.execute(query, params)
-    conn.commit()
-    lastrowid = cur.lastrowid
-    conn.close()
-    return lastrowid
+    attempts = 5
+    delay = 0.1
+    last_err = None
+    for attempt in range(attempts):
+        try:
+            conn = get_connection(db_path)
+            cur = conn.cursor()
+            cur.execute(query, params)
+            conn.commit()
+            lastrowid = cur.lastrowid
+            conn.close()
+            return lastrowid
+        except sqlite3.OperationalError as e:
+            last_err = e
+            if 'database is locked' in str(e).lower():
+                # wait and retry
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                time.sleep(delay)
+                delay *= 2
+                continue
+            else:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                raise
+    # if we exhausted retries, raise the last error
+    raise last_err
 
 
 def fetchall(query: str, params: tuple = (), db_path: Optional[str] = None):

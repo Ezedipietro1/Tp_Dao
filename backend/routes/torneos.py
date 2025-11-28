@@ -51,3 +51,13 @@ def api_delete_torneo(torneo_id):
         return jsonify({'torneo_id': torneo_id, 'status': 'deleted'})
     except Exception as e:
         return jsonify({'error': 'Error al eliminar torneo', 'detail': str(e)}), 500
+
+
+@torneos_bp.route('/torneos/<int:torneo_id>/reservas-sync', methods=['POST'])
+def api_sync_reservas_torneo(torneo_id):
+    payload = request.get_json() or {}
+    try:
+        summary = repositorio.sincronizar_reservas(torneo_id, payload)
+        return jsonify({'torneo_id': torneo_id, 'summary': summary})
+    except Exception as e:
+        return jsonify({'error': 'Error al sincronizar reservas', 'detail': str(e)}), 500

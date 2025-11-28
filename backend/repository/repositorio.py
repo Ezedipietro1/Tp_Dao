@@ -23,7 +23,7 @@ from .ReservasRepo import (
     calcular_ingresos,
     registrar_pago,
 )
-from .TorneosRepo import listar_torneos, obtener_torneo, crear_torneo, actualizar_torneo, eliminar_torneo
+from .TorneosRepo import listar_torneos, obtener_torneo, crear_torneo, actualizar_torneo, eliminar_torneo, sincronizar_reservas
 
 __all__ = [
     'listar_canchas', 'obtener_cancha',
@@ -36,4 +36,5 @@ __all__ = [
     'actualizar_cliente', 'eliminar_cliente',
     'crear_reserva', 'crear_reserva_por_dni', 'verificar_disponibilidad', 'verificar_disponibilidad_por_horario', 'cancelar_reserva', 'obtener_reserva', 'actualizar_reserva', 'listar_reservas', 'listar_horarios', 'calcular_ingresos', 'registrar_pago'
     , 'listar_torneos', 'obtener_torneo', 'crear_torneo', 'actualizar_torneo', 'eliminar_torneo'
+    , 'sincronizar_reservas'
 ]
