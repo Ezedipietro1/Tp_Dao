@@ -147,6 +147,12 @@ def api_reporte_reservas_por_canchas_periodo_json():
     fecha_hasta = request.args.get('hasta')
     if not fecha_desde or not fecha_hasta:
         return jsonify({'error': 'Parámetros required: desde, hasta (YYYY-MM-DD)'}), 400
+    dnis_raw = request.args.get('dnis')
+    dnis = None
+    if dnis_raw:
+        dnis = [x.strip() for x in dnis_raw.split(',') if x.strip()]
+        if len(dnis) == 0:
+            dnis = None
     include_details = request.args.get('include_details', '0') == '1'
     try:
         from db.connection import get_connection, DEFAULT_DB
@@ -156,22 +162,40 @@ def api_reporte_reservas_por_canchas_periodo_json():
     try:
         conn = get_connection(DEFAULT_DB)
         cur = conn.cursor()
-        cur.execute(
-            "SELECT ca.id AS cancha_id, tc.nombre AS tipo_nombre, COUNT(r.id) AS reservas_count "
-            "FROM cancha ca LEFT JOIN tipo_cancha tc ON ca.tipo_cancha_id = tc.id "
-            "LEFT JOIN reserva r ON r.cancha_id = ca.id AND r.fecha BETWEEN ? AND ? "
-            "GROUP BY ca.id ORDER BY reservas_count DESC",
-            (fecha_desde, fecha_hasta),
-        )
+        if dnis:
+            # build IN clause for the list of DNIs
+            placeholders = ','.join(['?'] * len(dnis))
+            sql = (
+                "SELECT ca.id AS cancha_id, tc.nombre AS tipo_nombre, COUNT(r.id) AS reservas_count "
+                "FROM cancha ca LEFT JOIN tipo_cancha tc ON ca.tipo_cancha_id = tc.id "
+                f"LEFT JOIN reserva r ON r.cancha_id = ca.id AND r.fecha BETWEEN ? AND ? AND r.cliente_dni IN ({placeholders}) "
+                "GROUP BY ca.id ORDER BY reservas_count DESC"
+            )
+            params = [fecha_desde, fecha_hasta] + dnis
+            cur.execute(sql, params)
+        else:
+            cur.execute(
+                "SELECT ca.id AS cancha_id, tc.nombre AS tipo_nombre, COUNT(r.id) AS reservas_count "
+                "FROM cancha ca LEFT JOIN tipo_cancha tc ON ca.tipo_cancha_id = tc.id "
+                "LEFT JOIN reserva r ON r.cancha_id = ca.id AND r.fecha BETWEEN ? AND ? "
+                "GROUP BY ca.id ORDER BY reservas_count DESC",
+                (fecha_desde, fecha_hasta),
+            )
         filas = cur.fetchall()
         out = []
         for f in filas:
             item = {'cancha_id': f['cancha_id'], 'tipo_nombre': f['tipo_nombre'] or None, 'reservas_count': int(f['reservas_count'])}
             if include_details and item['reservas_count'] > 0:
-                cur.execute(
-                    "SELECT r.id, r.fecha, r.cliente_dni, r.precio_final FROM reserva r WHERE r.cancha_id = ? AND r.fecha BETWEEN ? AND ? ORDER BY r.fecha",
-                    (item['cancha_id'], fecha_desde, fecha_hasta)
-                )
+                if dnis:
+                    placeholders = ','.join(['?'] * len(dnis))
+                    sql2 = f"SELECT r.id, r.fecha, r.cliente_dni, r.precio_final FROM reserva r WHERE r.cancha_id = ? AND r.fecha BETWEEN ? AND ? AND r.cliente_dni IN ({placeholders}) ORDER BY r.fecha"
+                    params2 = [item['cancha_id'], fecha_desde, fecha_hasta] + dnis
+                    cur.execute(sql2, params2)
+                else:
+                    cur.execute(
+                        "SELECT r.id, r.fecha, r.cliente_dni, r.precio_final FROM reserva r WHERE r.cancha_id = ? AND r.fecha BETWEEN ? AND ? ORDER BY r.fecha",
+                        (item['cancha_id'], fecha_desde, fecha_hasta)
+                    )
                 reservas = []
                 for rr in cur.fetchall():
                     cur.execute(

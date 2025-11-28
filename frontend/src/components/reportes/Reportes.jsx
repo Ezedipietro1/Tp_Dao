@@ -14,6 +14,8 @@
 			const [clientes, setClientes] = useState([]);
 			const [reservas, setReservas] = useState([]);
 			const [canchaData, setCanchaData] = useState([]);
+			const [canchaSelectedDnis, setCanchaSelectedDnis] = useState(null);
+			const [canchaClienteMenuOpen, setCanchaClienteMenuOpen] = useState(false);
 			const [displayCards, setDisplayCards] = useState([]);
 			const [selectedDnis, setSelectedDnis] = useState(null);
 			const [summaryText, setSummaryText] = useState('');
@@ -123,14 +125,29 @@
 
 			async function loadCanchasMasUtilizadas(limite=10) {
 				try {
-					const data = await reportesService.jsonCanchasMasUtilizadas(limite);
-					setCanchaData(data || []);
-					const labels = (data||[]).map(it=> `Cancha ${it.cancha_id}`);
-					const values = (data||[]).map(it=> it.reservas_count||0);
+					// Use the reservas por canchas JSON (which accepts desde/hasta and optional dni) and compute the top N
+					const from = desde || '';
+					const to = hasta || '';
+					const dnis = canchaSelectedDnis && Array.isArray(canchaSelectedDnis) ? canchaSelectedDnis : null;
+					const data = await reportesService.jsonReservasPorCanchas(from, to, false, dnis);
+					const arr = (data||[]).slice();
+					arr.sort((a,b)=> (b.reservas_count||0) - (a.reservas_count||0));
+					const top = arr.slice(0, limite);
+					setCanchaData(top || []);
+					const labels = (top||[]).map(it=> `Cancha ${it.cancha_id}`);
+					const values = (top||[]).map(it=> it.reservas_count||0);
 					updateChart(labels, values, 'Canchas más utilizadas');
 					setSummaryText('');
 				} catch (e) { console.error(e); alert('Error cargando canchas más utilizadas'); }
 			}
+
+			// When in 'canchas-mas-utilizadas' mode, reload when date range or client selection changes
+			useEffect(()=>{
+				if (mode === 'canchas-mas-utilizadas') {
+					loadCanchasMasUtilizadas();
+				}
+				// eslint-disable-next-line react-hooks/exhaustive-deps
+			}, [mode, desde, hasta, canchaSelectedDnis]);
 
 			useEffect(()=>{
 				if (mode === 'por-clientes') loadReservasClientesInteractive();
@@ -190,35 +207,62 @@
 
 					<div className="card mb-3">
 						<div className="card-body">
-							<div className="row g-2 align-items-end">
-								<div className="col-md-2">
-									<label className="form-label">Desde</label>
-									<input className="form-control" type="date" value={desde} onChange={e=>setDesde(e.target.value)} />
-								</div>
-								<div className="col-md-2">
-									<label className="form-label">Hasta</label>
-									<input className="form-control" type="date" value={hasta} onChange={e=>setHasta(e.target.value)} />
-								</div>
-								<div className="col-md-4">
-									<label className="form-label">Cliente (puede seleccionar varios)</label>
-									<div className="multiselect">
-										<button type="button" className="btn btn-light form-control text-start" onClick={toggleClienteMenu}>{selectedDnis && selectedDnis.length>0 ? (selectedDnis.length===1 ? (clientes.find(c=>String(c.dni)===String(selectedDnis[0]))?.nombre || selectedDnis[0]) : `${selectedDnis.length} clientes seleccionados`) : '-- Todos los clientes --'}</button>
-										<div className={`multiselect-menu ${clienteMenuOpen? '' : 'd-none'}`} style={{maxHeight:220, overflow:'auto', border:'1px solid #ddd', padding:8}}>
-											{(clientes||[]).map(c=> (
-												<label key={c.dni} style={{display:'block', padding:'4px 8px', cursor:'pointer'}}>
-													<input type="checkbox" data-dni={c.dni} value={c.dni} checked={selectedDnis ? selectedDnis.indexOf(String(c.dni))!==-1 : false} onChange={(e)=>onClientCheckboxChange(c.dni, e.target.checked)} /> <span> {c.nombre || ''} ({c.dni})</span>
-												</label>
-											))}
+							{mode !== 'utilizacion-mensual' && (
+								<div className="row g-2 align-items-end">
+									<div className="col-md-2">
+										<label className="form-label">Desde</label>
+										<input className="form-control" type="date" value={desde} onChange={e=>setDesde(e.target.value)} />
+									</div>
+									<div className="col-md-2">
+										<label className="form-label">Hasta</label>
+										<input className="form-control" type="date" value={hasta} onChange={e=>setHasta(e.target.value)} />
+									</div>
+									{mode === 'por-clientes' && (
+										<div className="col-md-4">
+											<label className="form-label">Cliente (puede seleccionar varios)</label>
+											<div className="multiselect">
+												<button type="button" className="btn btn-light form-control text-start" onClick={toggleClienteMenu}>{selectedDnis && selectedDnis.length>0 ? (selectedDnis.length===1 ? (clientes.find(c=>String(c.dni)===String(selectedDnis[0]))?.nombre || selectedDnis[0]) : `${selectedDnis.length} clientes seleccionados`) : '-- Todos los clientes --'}</button>
+												<div className={`multiselect-menu ${clienteMenuOpen? '' : 'd-none'}`} style={{maxHeight:220, overflow:'auto', border:'1px solid #ddd', padding:8}}>
+													{(clientes||[]).map(c=> (
+														<label key={c.dni} style={{display:'block', padding:'4px 8px', cursor:'pointer'}}>
+															<input type="checkbox" data-dni={c.dni} value={c.dni} checked={selectedDnis ? selectedDnis.indexOf(String(c.dni))!==-1 : false} onChange={(e)=>onClientCheckboxChange(c.dni, e.target.checked)} /> <span> {c.nombre || ''} ({c.dni})</span>
+														</label>
+													))}
+												</div>
+											</div>
 										</div>
+									)}
+
+									{mode === 'canchas-mas-utilizadas' && (
+										<div className="col-md-4">
+											<label className="form-label">Clientes (filtrar, puede seleccionar varios)</label>
+											<div className="multiselect">
+												<button type="button" className="btn btn-light form-control text-start" onClick={()=>setCanchaClienteMenuOpen(v=>!v)}>{canchaSelectedDnis && canchaSelectedDnis.length>0 ? (canchaSelectedDnis.length===1 ? (clientes.find(c=>String(c.dni)===String(canchaSelectedDnis[0]))?.nombre || canchaSelectedDnis[0]) : `${canchaSelectedDnis.length} clientes seleccionados`) : '-- Todos los clientes --'}</button>
+												<div className={`multiselect-menu ${canchaClienteMenuOpen? '' : 'd-none'}`} style={{maxHeight:220, overflow:'auto', border:'1px solid #ddd', padding:8}}>
+													{(clientes||[]).map(c=> (
+														<label key={c.dni} style={{display:'block', padding:'4px 8px', cursor:'pointer'}}>
+															<input type="checkbox" data-dni={c.dni} value={c.dni} checked={canchaSelectedDnis ? canchaSelectedDnis.indexOf(String(c.dni))!==-1 : false} onChange={(e)=>{
+																const cur = canchaSelectedDnis ? new Set(canchaSelectedDnis) : new Set();
+																if (e.target.checked) cur.add(String(c.dni)); else cur.delete(String(c.dni));
+																const arr = Array.from(cur);
+																setCanchaSelectedDnis(arr.length===0 ? null : arr);
+															}} /> <span> {c.nombre || ''} ({c.dni})</span>
+														</label>
+													))}
+												</div>
+											</div>
+										</div>
+									)}
+									<div className="col-md-4 d-flex gap-2">
+										{mode === 'por-clientes' && (
+											<button id="ri-filtrar" className="btn btn-primary" onClick={applyFilterClientes}>Filtrar</button>
+										)}
+										{mode === 'por-clientes' && (
+											<button id="ri-export" className="btn btn-success" onClick={exportPdf}>Exportar PDF</button>
+										)}
 									</div>
 								</div>
-								<div className="col-md-4 d-flex gap-2">
-									<button id="ri-filtrar" className="btn btn-primary" onClick={applyFilterClientes}>Filtrar</button>
-									{mode === 'por-clientes' && (
-										<button id="ri-export" className="btn btn-success" onClick={exportPdf}>Exportar PDF</button>
-									)}
-								</div>
-							</div>
+							)}
 							<div className="mb-3 mt-3" style={{height:260}}>
 								<canvas id="ri-chart" ref={chartRef} style={{width:'100%', height:'100%'}}></canvas>
 							</div>

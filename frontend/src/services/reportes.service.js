@@ -18,9 +18,14 @@ async function getReservasPorCliente(dni, options = { download: false }) {
   return resp;
 }
 
-async function jsonReservasPorCanchas(desde, hasta, include_details = false) {
+async function jsonReservasPorCanchas(desde, hasta, include_details = false, dnis = null) {
+  const params = { desde, hasta, include_details: include_details ? 1 : 0 };
+  if (dnis) {
+    // accept array or comma-separated string
+    params.dnis = Array.isArray(dnis) ? dnis.join(',') : String(dnis);
+  }
   const resp = await axios.get(`${baseUrl}/reportes/json/reservas/por-canchas`, {
-    params: { desde, hasta, include_details: include_details ? 1 : 0 }
+    params
   });
   return resp.data;
 }
