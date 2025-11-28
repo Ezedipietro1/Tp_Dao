@@ -15,13 +15,38 @@ function ModalDialog() {
 
   const handleAccionBoton1 = () => {
     if (accionBoton1) {
-      accionBoton1();
+      // if mensaje is a payment object, pass selectedMethod (plus card data if tarjeta)
+      try {
+        if (mensaje && typeof mensaje === 'object' && mensaje.type === 'payment') {
+          if (selectedMethod === 'tarjeta') {
+            accionBoton1({ method: 'tarjeta', card: { number: cardNumber, cvv: cardCVV, expiry: cardExpiry } });
+          } else {
+            accionBoton1('efectivo');
+          }
+        } else {
+          accionBoton1();
+        }
+      } catch (e) {
+        try { accionBoton1(); } catch (err) {}
+      }
     }
     setMensaje((x) => (x = ""));
   };
   const handleAccionBoton2 = () => {
     if (accionBoton2) {
-      accionBoton2();
+      try {
+        if (mensaje && typeof mensaje === 'object' && mensaje.type === 'payment') {
+          if (selectedMethod === 'tarjeta') {
+            accionBoton2({ method: 'tarjeta', card: { number: cardNumber, cvv: cardCVV, expiry: cardExpiry } });
+          } else {
+            accionBoton2('efectivo');
+          }
+        } else {
+          accionBoton2();
+        }
+      } catch (e) {
+        try { accionBoton2(); } catch (err) {}
+      }
     }
     setMensaje((x) => (x = ""));
   };
@@ -30,6 +55,13 @@ function ModalDialog() {
   const handleClose = () => {
     setMensaje((x) => (x = ""));
   };
+
+  // local state for payment modal selection
+  const [selectedMethod, setSelectedMethod] = useState('efectivo');
+  // card details state (only used when tarjeta selected)
+  const [cardNumber, setCardNumber] = useState('');
+  const [cardCVV, setCardCVV] = useState('');
+  const [cardExpiry, setCardExpiry] = useState('');
 
 
   function Show(
@@ -51,6 +83,14 @@ function ModalDialog() {
     setAccionBoton1(() => _accionBoton1);
     setAccionBoton2(() => _accionBoton2);
     setTipo((x) => (x = _tipo));
+    try {
+      if (_mensaje && typeof _mensaje === 'object' && _mensaje.type === 'payment') {
+        setSelectedMethod('efectivo');
+        setCardNumber('');
+        setCardCVV('');
+        setCardExpiry('');
+      }
+    } catch (e) {}
   }
 
 
@@ -88,7 +128,6 @@ function ModalDialog() {
       break;
   }
 
-
   if (mensaje === "") return null;
 
 
@@ -121,13 +160,76 @@ function ModalDialog() {
               ></div>
             </div>
           ) : (
-            <p>
-              <i
-                style={{ fontSize: "1.6em", margin: "0.5em" }}
-                className={faIcon}
-              ></i>
-              {mensaje}
-            </p>
+            // custom render when mensaje is an object
+            (mensaje && typeof mensaje === 'object' && mensaje.type === 'payment') ? (
+              <div>
+                <h5>Reserva #{mensaje.reserva.id}</h5>
+                <p><strong>Cancha:</strong> {mensaje.reserva.cancha_nombre}</p>
+                <p><strong>Cliente:</strong> {mensaje.reserva.cliente_nombre ?? mensaje.reserva.cliente_dni}</p>
+                <p><strong>Fecha:</strong> {mensaje.reserva.fecha}</p>
+                <p><strong>Horarios:</strong> {(mensaje.reserva.horarios_label && mensaje.reserva.horarios_label.join(', ')) || ''}</p>
+                <p><strong>Total:</strong> ${mensaje.reserva.precio}</p>
+                <hr />
+                <div className="form-check">
+                  <input className="form-check-input" type="radio" name="payMethod" id="efectivo" value="efectivo" checked={selectedMethod==='efectivo'} onChange={()=>setSelectedMethod('efectivo')} />
+                  <label className="form-check-label" htmlFor="efectivo">Efectivo</label>
+                </div>
+                <div className="form-check">
+                  <input className="form-check-input" type="radio" name="payMethod" id="tarjeta" value="tarjeta" checked={selectedMethod==='tarjeta'} onChange={()=>setSelectedMethod('tarjeta')} />
+                  <label className="form-check-label" htmlFor="tarjeta">Tarjeta</label>
+                </div>
+                {selectedMethod === 'tarjeta' && (
+                  <div className="mt-3">
+                    <div className="mb-2">
+                      <label className="form-label">Número de tarjeta</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={cardNumber}
+                        maxLength={19}
+                        onChange={(e) => {
+                          // keep only digits, limit to 16 digits, then format groups of 4
+                          const digits = e.target.value.replace(/\D/g, '').slice(0, 16);
+                          const groups = digits.match(/.{1,4}/g);
+                          setCardNumber(groups ? groups.join(' ') : digits);
+                        }}
+                        placeholder="0000 0000 0000 0000"
+                      />
+                    </div>
+                    <div className="row">
+                      <div className="col-6">
+                        <label className="form-label">Expiración (MM/AA)</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          value={cardExpiry}
+                          maxLength={5}
+                          onChange={(e) => {
+                            // keep only digits, limit to 4 digits (MMYY), insert slash after 2
+                            const digits = e.target.value.replace(/\D/g, '').slice(0, 4);
+                            const formatted = digits.length > 2 ? digits.slice(0, 2) + '/' + digits.slice(2) : digits;
+                            setCardExpiry(formatted);
+                          }}
+                          placeholder="MM/AA"
+                        />
+                      </div>
+                      <div className="col-6">
+                        <label className="form-label">CVV</label>
+                        <input type="password" className="form-control" value={cardCVV} maxLength={4} onChange={(e)=>setCardCVV(e.target.value.replace(/[^0-9]/g, ''))} placeholder="123" />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p>
+                <i
+                  style={{ fontSize: "1.6em", margin: "0.5em" }}
+                  className={faIcon}
+                ></i>
+                {mensaje}
+              </p>
+            )
           )}
         </Modal.Body>
 

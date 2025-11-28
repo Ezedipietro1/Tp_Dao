@@ -120,34 +120,25 @@ function ReservaBatchForm({ canchaIds = [], nombre = '', descripcion = '', clien
     if (!selectedHorarios || selectedHorarios.length === 0) { alert('Seleccione al menos un horario que esté disponible en todas las canchas'); return; }
     setProgress('Creando torneo...');
     try {
-      const torResp = await torneosService.crear({ nombre, descripcion, canchas: canchaIds });
-      const torneo_id = torResp?.torneo_id ?? torResp?.id ?? null;
-      if (!torneo_id) {
-        throw new Error('No se obtuvo id de torneo al crear');
-      }
+      // Build reservas payload and call backend once to create torneo + reservas
       const dates = buildDates();
-      let created = 0;
-      let errors = [];
+      const reservasPayload = [];
       for (let i=0;i<dates.length;i++){
         const d = dates[i];
         const fecha = d.toISOString().slice(0,10);
         for (let j=0;j<canchaIds.length;j++){
           const cancha_id = canchaIds[j];
-          const canchaDetail = await canchasService.BuscarPorId({ id: cancha_id }).catch(()=>null);
-          const precio = canchaDetail?.precio_final ?? canchaDetail?.tipo_precio ?? 0;
           for (let k=0;k<selectedHorarios.length;k++){
             const hid = selectedHorarios[k].id;
-            try {
-              await reservasService.Grabar({ cancha_id, fecha, horario_ids: [hid], cliente_dni: clienteDni, precio, torneo_id });
-              created += 1;
-            } catch (e) {
-              errors.push({ cancha_id, fecha, horario_id: hid, error: e?.response?.data || String(e) });
-            }
+            reservasPayload.push({ fecha, cancha_id, horario_ids: [hid] });
           }
         }
       }
-      setProgress(`Reservas creadas: ${created}` + (errors.length? `, errores: ${errors.length}`: ''));
-      alert(`Torneo creado (id ${torneo_id}). Reservas creadas: ${created}. Errores: ${errors.length}`);
+      const torResp = await torneosService.crear({ nombre, descripcion, fecha_inicio: startDate || (dates[0] ? dates[0].toISOString().slice(0,10) : null), fecha_fin: endDate || null, cliente_dni: clienteDni, canchas: canchaIds, reservas: reservasPayload });
+      const torneo_id = torResp?.torneo_id ?? torResp?.id ?? null;
+      if (!torneo_id) throw new Error('No se obtuvo id de torneo al crear');
+      setProgress(`Torneo creado (id ${torneo_id}). Reservas programadas: ${reservasPayload.length}`);
+      alert(`Torneo creado (id ${torneo_id}). Reservas programadas: ${reservasPayload.length}`);
     } catch (e) {
       console.error(e);
       setProgress('Error');

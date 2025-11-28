@@ -25,6 +25,13 @@ function Clientes() {
 
   // notas: ya no usamos obras sociales en el formulario de clientes simplificado
 
+  useEffect(() => {
+    // on mount, fetch all clients so the list shows without pressing Buscar
+    (async () => {
+      try { await Buscar(); } catch (e) {}
+    })();
+  }, []);
+
   async function Buscar() {
     modalDialogService.BloquearPantalla(true);
     const data = await clientesService.Buscar({ nombre: Nombre });

@@ -1,5 +1,7 @@
 from typing import List, Dict, Any, Optional
 from db.connection import execute, fetchone, fetchall
+from .ReservasRepo import crear_reserva_por_dni
+from .CanchasRepo import obtener_cancha
 
 def _ensure_schema():
     # create supporting tables if they don't exist: torneo_meta and torneo_x_cancha
@@ -69,6 +71,37 @@ def crear_torneo(payload: Dict[str, Any]) -> int:
     # insert mappings
     for cid in cancha_ids:
         execute("INSERT OR IGNORE INTO torneo_x_cancha (torneo_id, cancha_id) VALUES (?, ?)", (tid, cid))
+    # optionally create associated reservas if provided in payload
+    # expected structure: payload['reservas'] = [ { 'fecha': 'YYYY-MM-DD', 'cancha_id': int, 'horario_ids': [int,...], 'cliente_dni': '...', (optional) 'precio': number (optional) }, ... ]
+    reservas = payload.get('reservas') or []
+    created_reservas = []
+    for r in reservas:
+        try:
+            # ensure required fields
+            fecha = r.get('fecha')
+            cancha_id = r.get('cancha_id')
+            horario_ids = r.get('horario_ids') or r.get('horario_id')
+            cliente_dni = r.get('cliente_dni') or payload.get('cliente_dni')
+            # compute precio if not provided: use cancha precio_final
+            precio = r.get('precio')
+            if precio is None:
+                cinfo = obtener_cancha(cancha_id)
+                precio = cinfo.get('precio_final') if cinfo else 0
+            # build reserva payload for crear_reserva_por_dni
+            reserva_payload = {
+                'cancha_id': cancha_id,
+                'cliente_dni': cliente_dni,
+                'fecha': fecha,
+                'horario_ids': horario_ids,
+                'precio': precio,
+                'torneo_id': tid,
+            }
+            res_id = crear_reserva_por_dni(reserva_payload)
+            created_reservas.append(res_id)
+        except Exception:
+            # on error creating a specific reserva, continue with others (caller may inspect torneo afterwards)
+            continue
+
     return tid
 
 

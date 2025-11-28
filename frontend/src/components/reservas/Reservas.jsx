@@ -36,6 +36,8 @@ function Reservas() {
         } catch (e) {}
       }
       cargarLookup();
+      // show all reservations on initial load
+      (async () => { try { await Buscar(); } catch (e) {} })();
     }, []);
   
     async function Buscar() {
@@ -53,6 +55,20 @@ function Reservas() {
       const data = await reservasService.Buscar(params);
       modalDialogService.BloquearPantalla(false);
       setItems(data);
+    }
+
+    // Update a single reserva in the local Items state to 'pagado'
+    function MarcarPagado(id) {
+      try {
+        setItems((prev) => {
+          if (!prev) return prev;
+          return prev.map((it) => {
+            const itId = it.id ?? it.Id;
+            if (itId === id) return { ...it, estado_pago: 'pagado' };
+            return it;
+          });
+        });
+      } catch (e) {}
     }
   
   
@@ -207,12 +223,14 @@ function Reservas() {
       {/* Tabla de resutados de busqueda y Paginador */}
       {AccionABMC === "L" && Items?.length > 0 &&
               <ReservasListado
-                  {...{
-                      Items,
-                      Consultar,
-                      Modificar,
-                      ActivarDesactivar,
-                  }}
+            {...{
+              Items,
+              Consultar,
+              Modificar,
+              ActivarDesactivar,
+              Buscar,
+              MarcarPagado,
+            }}
               />
           }
   

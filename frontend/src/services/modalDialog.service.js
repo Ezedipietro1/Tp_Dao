@@ -80,3 +80,19 @@ const modalDialogService = { Alert, Confirm, BloquearPantalla, subscribeShow };
 
 
 export default modalDialogService;
+
+// Special modal helper for payments. Call like:
+// modalDialogService.ShowPayment(reserva, onConfirm(method), onCancel)
+export function ShowPayment(reserva, onConfirm, onCancel) {
+  if (ModalDialog_Show) {
+    // _mensaje can be an object that ModalDialog will interpret specially
+    ModalDialog_Show({ type: 'payment', reserva }, 'Pagar reserva', 'Pagar', 'Cancelar', onConfirm, onCancel, 'warning');
+  } else {
+    // fallback: modal not mounted — choose default method silently (efectivo)
+    try {
+      if (onConfirm) onConfirm('efectivo');
+    } catch (e) {
+      if (onCancel) onCancel();
+    }
+  }
+}

@@ -58,6 +58,27 @@ def _row_to_reserva(row: Dict[str, Any]) -> Reserva:
     except Exception:
         pass
 
+    # payment summary (may be added by listar_reservas as `pago_total`)
+    try:
+        pago_total = row.get('pago_total') if row.get('pago_total') is not None else 0
+        try:
+            r.pago_total = float(pago_total)
+        except Exception:
+            r.pago_total = 0.0
+    except Exception:
+        r.pago_total = 0.0
+
+    try:
+        # determine estado_pago: 'pagado' if pago_total >= precio_final, otherwise 'pendiente'
+        precio = getattr(r, '_precio_final', None) or row.get('precio_final') or 0
+        try:
+            precio_val = float(precio)
+        except Exception:
+            precio_val = 0.0
+        r.estado_pago = 'pagado' if getattr(r, 'pago_total', 0) >= precio_val and precio_val > 0 else 'pendiente'
+    except Exception:
+        r.estado_pago = 'pendiente'
+
     try:
         # prefer cancha.nombre if available, otherwise derive from tipo_cancha
         try:
@@ -448,7 +469,18 @@ def listar_reservas(cancha_id: Optional[int] = None) -> List[Reserva]:
     else:
         q = base + " ORDER BY r.fecha"
         rows = fetchall(q)
-    return [_row_to_reserva(r) for r in rows]
+    # augment each row with payment total for convenience
+    out = []
+    for r in rows:
+        try:
+            pid = r.get('id')
+            pay = fetchone("SELECT SUM(monto) as total FROM pago WHERE reserva_id = ?", (pid,))
+            total = pay.get('total') if pay and pay.get('total') is not None else 0
+            r['pago_total'] = total
+        except Exception:
+            r['pago_total'] = 0
+        out.append(_row_to_reserva(r))
+    return out
 
 
 def listar_horarios() -> List[Dict[str, Any]]:
@@ -464,5 +496,7 @@ def calcular_ingresos(fecha_inicio_iso: str, fecha_fin_iso: str) -> float:
 
 
 def registrar_pago(pago: Dict[str, Any]) -> int:
-    q = "INSERT INTO pago (reserva_id, metodo_pago_id, monto) VALUES (?, ?, ?)"
-    return execute(q, (pago['reserva_id'], pago['metodo_pago_id'], pago['monto']))
+    # pago may optionally include 'estado_id'; default to 2 (Pagado) if not provided
+    estado_id = pago.get('estado_id') if 'estado_id' in pago else 2
+    q = "INSERT INTO pago (reserva_id, metodo_pago_id, monto, estado_id) VALUES (?, ?, ?, ?)"
+    return execute(q, (pago['reserva_id'], pago['metodo_pago_id'], pago['monto'], estado_id))

@@ -83,6 +83,8 @@ def api_listar_reservas():
                 'cliente_dni': cliente_dni,
                 'cliente_nombre': getattr(r, 'cliente_nombre', None),
                 'precio': r.get_precio_final() if hasattr(r, 'get_precio_final') else getattr(r, 'precio_final', None),
+                'pago_total': getattr(r, 'pago_total', 0),
+                'estado_pago': getattr(r, 'estado_pago', 'pendiente'),
                 'fecha': fecha_iso,
                 'horarios': horarios_out,
                 'horarios_label': horarios_label,
@@ -143,6 +145,8 @@ def api_get_reserva(reserva_id):
                 'cliente_dni': getattr(r, 'cliente', None) and (r.cliente.get_dni() if hasattr(r.cliente, 'get_dni') else getattr(r.cliente, 'dni', None)) or getattr(r, 'cliente_dni', None),
                 'cliente_nombre': getattr(r, 'cliente_nombre', None),
                 'precio': r.get_precio_final() if hasattr(r, 'get_precio_final') else getattr(r, '_precio_final', None) or getattr(r, 'precio', None),
+                'pago_total': getattr(r, 'pago_total', 0),
+                'estado_pago': getattr(r, 'estado_pago', 'pendiente'),
                 'fecha': fecha_iso,
                 'horarios': horarios_out,
             }

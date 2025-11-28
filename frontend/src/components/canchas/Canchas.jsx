@@ -24,6 +24,13 @@ function Canchas() {
     // tipos de canchas no están expuestos por el backend por ahora.
     // Si deseas, podemos crear un endpoint para listar tipos (recomendado).
 
+  useEffect(() => {
+    // on mount, fetch all canchas so the list shows without pressing Buscar
+    (async () => {
+      try { await Buscar(); } catch (e) {}
+    })();
+  }, []);
+
 
   
     async function Buscar(filters) {

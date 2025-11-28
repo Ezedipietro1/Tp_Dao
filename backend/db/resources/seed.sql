@@ -123,9 +123,7 @@ VALUES
 INSERT INTO metodo_pago (nombre)
 VALUES
     ('Efectivo'),
-    ('Tarjeta de crédito'),
-    ('Transferencia'),
-    ('Tarjeta de débito');
+    ('Tarjeta');
 
 -- ----------------------------
 -- TABLA: pago

@@ -297,3 +297,44 @@ thead {
 .text {
   color: #ffffffc7 !important;
 }
+/* ===== Ajustes generales para TODOS los modales (Bootstrap) ===== */
+.modal {
+  padding: 0 0.5rem;              /* un poquito de margen lateral en móviles */
+}
+
+.modal-dialog {
+  max-width: 480px;               /* ancho razonable del cuadro de pago */
+  margin: 1.25rem auto;
+}
+
+@media (max-width: 576px) {
+  .modal-dialog {
+    max-width: 100%;
+    margin: 0.5rem;               /* que use casi todo el ancho del celular */
+  }
+}
+
+/* que el contenido nunca sea más alto que la pantalla y pueda scrollearse */
+.modal-content {
+  max-height: calc(100vh - 1rem); /* 1rem de margen arriba/abajo */
+  overflow-y: auto;
+}
+
+/* ===== Compactar formularios SOLO dentro del modal ===== */
+.modal form {
+  background-color: transparent;  /* mismo fondo que el modal */
+  border: none;
+  box-shadow: none;               /* sin sombra interna extra */
+  margin: 0;
+  padding: 0;
+}
+
+/* labels dentro del modal: sin margen negativo ni altura fija */
+.modal label:not([class^="custom-control"]) {
+  background-color: #d7dfe7;
+  border-radius: 0.25rem;
+  border-bottom: none;
+  margin-right: 0;
+  padding-left: 0.5em;
+  height: auto;
+}
