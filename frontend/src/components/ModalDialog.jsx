@@ -19,6 +19,11 @@ function ModalDialog() {
       try {
         if (mensaje && typeof mensaje === 'object' && mensaje.type === 'payment') {
           if (selectedMethod === 'tarjeta') {
+            const v = validateCardExpiry(cardExpiry);
+            if (!v.ok) {
+              try { modalDialogService.Alert(v.msg, 'Atención', 'Aceptar', '', null, null, 'warning'); } catch (e) { alert(v.msg); }
+              return;
+            }
             accionBoton1({ method: 'tarjeta', card: { number: cardNumber, cvv: cardCVV, expiry: cardExpiry } });
           } else {
             accionBoton1('efectivo');
@@ -37,6 +42,11 @@ function ModalDialog() {
       try {
         if (mensaje && typeof mensaje === 'object' && mensaje.type === 'payment') {
           if (selectedMethod === 'tarjeta') {
+            const v = validateCardExpiry(cardExpiry);
+            if (!v.ok) {
+              try { modalDialogService.Alert(v.msg, 'Atención', 'Aceptar', '', null, null, 'warning'); } catch (e) { alert(v.msg); }
+              return;
+            }
             accionBoton2({ method: 'tarjeta', card: { number: cardNumber, cvv: cardCVV, expiry: cardExpiry } });
           } else {
             accionBoton2('efectivo');
@@ -62,6 +72,30 @@ function ModalDialog() {
   const [cardNumber, setCardNumber] = useState('');
   const [cardCVV, setCardCVV] = useState('');
   const [cardExpiry, setCardExpiry] = useState('');
+
+  // validate expiry MM/AA and that date is after current month
+  function validateCardExpiry(expiry) {
+    if (!expiry || typeof expiry !== 'string') return { ok: false, msg: 'Expiración inválida' };
+    const s = expiry.trim();
+    // accept MM/AA or MMAA without slash
+    const parts = s.indexOf('/') !== -1 ? s.split('/') : [s.slice(0,2), s.slice(2)];
+    if (parts.length !== 2) return { ok: false, msg: 'Formato de expiración debe ser MM/AA' };
+    const mm = parts[0].padStart(2, '0');
+    const aa = parts[1].padStart(2, '0');
+    if (!/^[0-9]{2}$/.test(mm) || !/^[0-9]{2}$/.test(aa)) return { ok: false, msg: 'Formato de expiración inválido' };
+    const month = parseInt(mm, 10);
+    const year2 = parseInt(aa, 10);
+    if (isNaN(month) || month < 1 || month > 12) return { ok: false, msg: 'El mes debe estar entre 01 y 12' };
+    // interpret year as 2000+yy
+    const fullYear = 2000 + year2;
+    const now = new Date();
+    const curYear = now.getFullYear();
+    const curMonth = now.getMonth() + 1; // 1-12
+    // expiry must be strictly after current month/year
+    if (fullYear < curYear) return { ok: false, msg: 'La tarjeta ya expiró' };
+    if (fullYear === curYear && month <= curMonth) return { ok: false, msg: 'La fecha de expiración debe ser posterior al mes actual' };
+    return { ok: true };
+  }
 
 
   function Show(
