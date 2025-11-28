@@ -170,8 +170,8 @@ function ReservaBatchForm({ canchaIds = [], nombre = '', descripcion = '', clien
     if (!checkDate) { modalDialogService.Alert('Seleccione una fecha para comprobar horarios (y crear reservas)', 'Atención', 'Aceptar', '', null, null, 'warning'); return; }
     setProgress('Creando torneo...');
     try {
-      // Use single checkDate as the date for all reservas
-      const fecha = (new Date(checkDate)).toISOString().slice(0,10);
+      // Use single checkDate as the date for all reservas (checkDate already in YYYY-MM-DD)
+      const fecha = checkDate;
       const reservasPayload = [];
       for (let j=0;j<canchaIds.length;j++){
         const cancha_id = canchaIds[j];
@@ -229,8 +229,20 @@ function ReservaBatchForm({ canchaIds = [], nombre = '', descripcion = '', clien
                   <div className="badge bg-light text-dark ms-2 p-2 fs-5">{
                     (() => {
                       try {
-                        const d = new Date(fechaReservas || checkDate || '');
-                        if (!fechaReservas) return 'Sin fecha';
+                        const src = fechaReservas || checkDate || '';
+                        if (!src) return 'Sin fecha';
+                        // parse YYYY-MM-DD into local Date to avoid timezone shifts
+                        const parts = String(src).split('-');
+                        let d;
+                        if (parts.length === 3) {
+                          const y = parseInt(parts[0],10);
+                          const m = parseInt(parts[1],10) - 1;
+                          const day = parseInt(parts[2],10);
+                          d = new Date(y, m, day);
+                        } else {
+                          d = new Date(src);
+                        }
+                        if (!d || isNaN(d.getTime())) return src;
                         const dd = String(d.getDate()).padStart(2,'0');
                         const mm = String(d.getMonth()+1).padStart(2,'0');
                         const yyyy = d.getFullYear();
@@ -326,7 +338,7 @@ function ReservaBatchForm({ canchaIds = [], nombre = '', descripcion = '', clien
               {!viewOnly && isEditing && (
                 <button type="button" className="btn btn-primary me-2" onClick={() => {
                   const payload = {
-                    fecha: (new Date(checkDate)).toISOString().slice(0,10),
+                    fecha: checkDate,
                     cancha_ids: canchaIds,
                     horario_ids: (selectedHorarios || []).map(h => h.id).filter(x=>x!==undefined && x!==null),
                     cliente_dni: clienteDni

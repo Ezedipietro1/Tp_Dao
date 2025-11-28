@@ -158,6 +158,15 @@
 				// eslint-disable-next-line react-hooks/exhaustive-deps
 			}, [mode]);
 
+			// Reload 'reservas por canchas' when the date range changes while in that mode
+			useEffect(()=>{
+				if (mode === 'por-canchas') {
+					// only attempt load if both dates are set
+					if (desde && hasta) loadReservasPorCanchasPeriod();
+				}
+				// eslint-disable-next-line react-hooks/exhaustive-deps
+			}, [mode, desde, hasta]);
+
 			function toggleClienteMenu(){ setClienteMenuOpen(v=>!v); }
 			function onClientCheckboxChange(dni, checked) {
 				const cur = selectedDnis ? new Set(selectedDnis) : new Set();
